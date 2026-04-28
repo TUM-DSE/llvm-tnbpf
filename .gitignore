@@ -89,4 +89,5 @@ pythonenv*
 /lldb/docs/python_api/
 
 .direnv
+test/*.o
 

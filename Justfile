@@ -25,3 +25,8 @@ configure:
 
 build:
     ninja -Cbuild
+
+
+compile-bpf:
+    ./build/bin/clang -O2 -g -I"${LINUX_HEADERS}/include" -I"${LIBBPF}/include" -target bpf -c test/hello.bpf.c -o test/hello.bpf.o
+

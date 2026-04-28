@@ -54,9 +54,13 @@
               clang
               zlib
               just
+              linuxHeaders
+              libbpf
             ];
 
             NIX_LDFLAGS = "-rpath ${pkgs.zlib}/lib";
+            LINUX_HEADERS = "${pkgs.linuxHeaders}";
+            LIBBPF = "${pkgs.libbpf}";
           };
         }
       );
