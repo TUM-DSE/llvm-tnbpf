@@ -50,6 +50,7 @@
 #include "llvm/Transforms/ObjCARC.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils.h"
+
 #include <cassert>
 #include <optional>
 #include <string>
@@ -1121,7 +1122,6 @@ static cl::opt<RegisterRegAlloc::FunctionPassCtor, false,
 /// before/after any target-independent pass. But it's currently overkill.
 void TargetPassConfig::addMachinePasses() {
   AddingMachinePasses = true;
-
   // Add passes that optimize machine instructions in SSA form.
   if (getOptLevel() != CodeGenOptLevel::None) {
     addMachineSSAOptimization();
