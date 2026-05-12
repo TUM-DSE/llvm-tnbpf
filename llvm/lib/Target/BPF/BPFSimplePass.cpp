@@ -4,9 +4,10 @@
 
 #include "BPFSimplePass.h"
 #include "BPF.h"
-#include <iostream>
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/IR/DebugInfoMetadata.h"
+#include <iostream>
 
 #define DEBUG_TYPE "bpf-simple"
 
@@ -23,9 +24,14 @@ namespace {
     bool runOnMachineFunction(MachineFunction &M) override {
       LLVM_DEBUG(dbgs() << "begin bpf simple pass debug" << "\n");
       M.print(dbgs());
+      auto &LC = M.getFunction().getContext();
       for (auto &x : M) {
         LLVM_DEBUG(dbgs() << "Machine Basic Block: " << x << "\n");
         for (auto &y : x) {
+          // https://stackoverflow.com/a/13816135
+          if (y.isBranch()) {
+            y.setPCSections(M, MDNode::get(LC, MDString::get(LC, "this is a branch instruction")));
+          }
           LLVM_DEBUG(dbgs() << "Machine Instr: " << y << "\n");
         }
       }
