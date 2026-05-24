@@ -30,3 +30,6 @@ build:
 compile-bpf:
     ./build/bin/clang -mllvm -debug -O2 -g -I"${LINUX_HEADERS}/include" -I"${LIBBPF}/include" -target bpf -c test/hello.bpf.c -o test/hello.bpf.o
 
+compile-bpf-ir:
+   ./build/bin/clang -S -emit-llvm -mllvm -debug -O2 -g -I"${LINUX_HEADERS}/include" -I"${LIBBPF}/include" -target bpf -c test/hello.bpf.c -o test/hello.bpf.ll
+

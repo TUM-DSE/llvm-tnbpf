@@ -1263,6 +1263,9 @@ void CodeGenFunction::EmitDoStmt(const DoStmt &S,
 
 void CodeGenFunction::EmitForStmt(const ForStmt &S,
                                   ArrayRef<const Attr *> ForAttrs) {
+
+  llvm::MDBuilder mb(this->getLLVMContext());
+
   JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
 
   std::optional<LexicalScope> ForScope;
@@ -1329,6 +1332,7 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
 
     // C99 6.8.5p2/p4: The first substatement is executed if the expression
     // compares unequal to 0.  The condition must be a scalar type.
+
     llvm::Value *BoolCondVal = EvaluateExprAsBool(S.getCond());
 
     MaybeEmitDeferredVarDeclInit(S.getConditionVariable());
@@ -1339,7 +1343,11 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
       BoolCondVal = emitCondLikelihoodViaExpectIntrinsic(
           BoolCondVal, Stmt::getLikelihood(S.getBody()));
 
+    llvm::MDNode *forloop_cond = mb.createPCSections({{"for-loop-condition-tag", {}}});
+    //llvm::MDTuple *mds = llvm::MDTuple::get(this->getLLVMContext(), {Weights, forloop_cond});
     auto *I = Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock, Weights);
+    I->setMetadata("pcsections", forloop_cond);
+
     // Key Instructions: Emit the condition and branch as separate atoms to
     // match existing loop stepping behaviour. FIXME: We could have the branch
     // as the backup location for the condition, which would probably be a

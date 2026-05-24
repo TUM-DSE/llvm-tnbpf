@@ -7,6 +7,8 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/MDBuilder.h"
+
 #include <iostream>
 
 #define DEBUG_TYPE "bpf-simple"
@@ -25,12 +27,19 @@ namespace {
       LLVM_DEBUG(dbgs() << "begin bpf simple pass debug" << "\n");
       M.print(dbgs());
       auto &LC = M.getFunction().getContext();
+      MDBuilder MB(LC);
+      int loop_count = 0;
       for (auto &x : M) {
         LLVM_DEBUG(dbgs() << "Machine Basic Block: " << x << "\n");
         for (auto &y : x) {
           // https://stackoverflow.com/a/13816135
           if (y.isBranch()) {
-            y.setPCSections(M, MDNode::get(LC, MDString::get(LC, "this is a branch instruction")));
+            //y.setPCSections(M, MB.createPCSections({
+            //  {"loop_info", {llvm::ConstantInt::get(LC, APInt(64, loop_count++))}}
+            //}));
+          }
+          if (y.getPCSections()) {
+              //do stuff with PC sec
           }
           LLVM_DEBUG(dbgs() << "Machine Instr: " << y << "\n");
         }

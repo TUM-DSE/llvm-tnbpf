@@ -6260,6 +6260,8 @@ bool Compiler<Emitter>::visitForStmt(const ForStmt *S) {
       return false;
     if (!this->jumpFalse(EndLabel, S))
       return false;
+
+
   }
   if (!this->maybeEmitDeferredVarInit(S->getConditionVariable()))
     return false;
