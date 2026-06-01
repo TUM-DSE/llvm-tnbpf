@@ -660,6 +660,8 @@ void CodeGenFunction::EmitBlock(llvm::BasicBlock *BB, bool IsFinished) {
   Builder.SetInsertPoint(BB);
 }
 
+
+
 void CodeGenFunction::EmitBranch(llvm::BasicBlock *Target) {
   // Emit a branch from the current block to the target one if this
   // was a real block.  If this was just a fall-through block after a
@@ -1059,6 +1061,17 @@ template <typename LoopStmt> static bool hasEmptyLoopBody(const LoopStmt &S) {
   return false;
 }
 
+static std::atomic<unsigned long long> loop_id = 0;
+
+static void pcSectionTagInstr(llvm::LLVMContext &context, llvm::MDBuilder &mb, std::string name, llvm::Instruction *instr, uint64_t loop_number) {
+
+  llvm::MDNode *node = mb.createPCSections({
+    {name, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, loop_number))}}
+  });
+
+  instr->setMetadata("pcsections", node);
+}
+
 void CodeGenFunction::EmitWhileStmt(const WhileStmt &S,
                                     ArrayRef<const Attr *> WhileAttrs) {
   // Emit the header for the loop, which will also become
@@ -1263,9 +1276,10 @@ void CodeGenFunction::EmitDoStmt(const DoStmt &S,
 
 void CodeGenFunction::EmitForStmt(const ForStmt &S,
                                   ArrayRef<const Attr *> ForAttrs) {
+  llvm::LLVMContext &con = this->getLLVMContext();
+  llvm::MDBuilder mb(con);
 
-  llvm::MDBuilder mb(this->getLLVMContext());
-
+  unsigned long long cur_loop_id = loop_id.fetch_add(1);
   JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
 
   std::optional<LexicalScope> ForScope;
@@ -1273,6 +1287,10 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
     ForScope.emplace(*this, S.getSourceRange());
 
   // Evaluate the first part before the loop.
+
+  // We aren't going to tag the init part of the for loop: it doesn't matter if
+  // a line of code is right before a for loop or if it is simply before the
+  // loop
   if (S.getInit())
     EmitStmt(S.getInit());
 
@@ -1282,6 +1300,7 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   JumpDest CondDest = getJumpDestInCurrentScope("for.cond");
   llvm::BasicBlock *CondBlock = CondDest.getBlock();
   EmitBlock(CondBlock);
+
 
   if (CGM.shouldEmitConvergenceTokens())
     ConvergenceTokenStack.push_back(emitConvergenceLoopToken(CondBlock));
@@ -1330,8 +1349,13 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
     // As long as the condition is true, iterate the loop.
     llvm::BasicBlock *ForBody = createBasicBlock("for.body");
 
+    // TODO: This is an extremely hacky way to tag whatever is behind this for loop's condition
+    // Make this better!
+
+
     // C99 6.8.5p2/p4: The first substatement is executed if the expression
     // compares unequal to 0.  The condition must be a scalar type.
+
 
     llvm::Value *BoolCondVal = EvaluateExprAsBool(S.getCond());
 
@@ -1343,17 +1367,26 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
       BoolCondVal = emitCondLikelihoodViaExpectIntrinsic(
           BoolCondVal, Stmt::getLikelihood(S.getBody()));
 
-    llvm::MDNode *forloop_cond = mb.createPCSections({{"for-loop-condition-tag", {}}});
     //llvm::MDTuple *mds = llvm::MDTuple::get(this->getLLVMContext(), {Weights, forloop_cond});
+
+
     auto *I = Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock, Weights);
-    I->setMetadata("pcsections", forloop_cond);
+    pcSectionTagInstr(con, mb, "forloop_cond_branch", I, cur_loop_id);
+
+    auto BeforeCond = &Builder.GetInsertBlock()->front();
+    pcSectionTagInstr(con, mb, "forloop_condition_before", BeforeCond, cur_loop_id);
 
     // Key Instructions: Emit the condition and branch as separate atoms to
     // match existing loop stepping behaviour. FIXME: We could have the branch
     // as the backup location for the condition, which would probably be a
     // better experience (no jumping to the brace).
-    if (auto *CondI = dyn_cast<llvm::Instruction>(BoolCondVal))
+    if (auto *CondI = dyn_cast<llvm::Instruction>(BoolCondVal)) {
       addInstToNewSourceAtom(CondI, nullptr);
+      // TODO: this apparently fails to trigger, we probably need to mess with
+      // the condition builder
+      pcSectionTagInstr(con, mb, "forloop_cond_instr", CondI, cur_loop_id);
+    }
+
     addInstToNewSourceAtom(I, nullptr);
 
     if (ExitBlock != LoopExit.getBlock()) {
@@ -1375,7 +1408,10 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
     // Create a separate cleanup scope for the body, in case it is not
     // a compound statement.
     RunCleanupsScope BodyScope(*this);
+    auto BeforeBodyBlock = Builder.GetInsertBlock();
     EmitStmt(S.getBody());
+    auto BeforeBody = &BeforeBodyBlock->front();
+    pcSectionTagInstr(con, mb, "forloop_body_begin", BeforeBody, cur_loop_id);
   }
 
   // The last block in the loop's body (which unconditionally branches to the
@@ -1383,9 +1419,15 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   auto *FinalBodyBB = Builder.GetInsertBlock();
 
   // If there is an increment, emit it next.
-  if (S.getInc()) {
+  bool did_incr_branch = S.getInc();
+  if (did_incr_branch) {
     EmitBlock(Continue.getBlock());
+    pcSectionTagInstr(con, mb, "forloop_body_br", FinalBodyBB->getTerminator(), cur_loop_id);
+    //
+    auto BeforeIncBlock = Builder.GetInsertBlock();
     EmitStmt(S.getInc());
+    auto BeforeInc = &BeforeIncBlock->front();
+    pcSectionTagInstr(con, mb, "forloop_incr_begin", BeforeInc, cur_loop_id);
   }
 
   BreakContinueStack.pop_back();
@@ -1393,7 +1435,20 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   ConditionScope.ForceCleanup();
 
   EmitStopPoint(&S);
-  EmitBranch(CondBlock);
+
+  llvm::BasicBlock *CurBB = Builder.GetInsertBlock();
+
+  //unwraps the EmitBranch function
+  if (!CurBB || CurBB->hasTerminator()) {
+    // If there is no insert point or the previous block is already
+    // terminated, don't touch it.
+  } else {
+    // Otherwise, create a fall-through branch.
+    auto BodyBr = Builder.CreateBr(CondBlock);
+    pcSectionTagInstr(con, mb,  did_incr_branch ? "forloop_incr_br" : "forloop_body_br", BodyBr, cur_loop_id);
+  }
+
+  Builder.ClearInsertionPoint();
 
   if (ForScope)
     ForScope->ForceCleanup();

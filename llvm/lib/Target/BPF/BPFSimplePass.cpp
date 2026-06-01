@@ -28,7 +28,6 @@ namespace {
       M.print(dbgs());
       auto &LC = M.getFunction().getContext();
       MDBuilder MB(LC);
-      int loop_count = 0;
       for (auto &x : M) {
         LLVM_DEBUG(dbgs() << "Machine Basic Block: " << x << "\n");
         for (auto &y : x) {
@@ -39,7 +38,7 @@ namespace {
             //}));
           }
           if (y.getPCSections()) {
-              //do stuff with PC sec
+              //do stuff with PC sectio
           }
           LLVM_DEBUG(dbgs() << "Machine Instr: " << y << "\n");
         }
