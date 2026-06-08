@@ -2,10 +2,39 @@
 #include <bpf/bpf_helpers.h>
 
 SEC("tracepoint/syscalls/sys_enter_execve")
-int hello_world(void *ctx)
-{
+int hello_world(void *ctx) {
     for (int i=0;i<5000;i++) {
-      bpf_printk("hello world\n");
+      bpf_printk("ascending loop <\n");
+    }
+    for (int i=0;i<=5000;i++) {
+      bpf_printk("ascending loop <=\n");
+    }
+    for (int i=5000;i>0;i--) {
+      bpf_printk("descending loop >\n");
+    }
+    for (int i=5000;i>=0;i--) {
+      bpf_printk("descending loop >=\n");
+    }
+
+    for (int i=0;i<5000;i+=3) {
+      bpf_printk("ascending loop < stride 3\n");
+    }
+    for (int i=0;i<=5000;i+=3) {
+      bpf_printk("ascending loop <= stride 3\n");
+    }
+    for (int i=5000;i>0;i-=3) {
+      bpf_printk("descending loop > stride 3\n");
+    }
+    for (int i=5000;i>=0;i-=3) {
+      bpf_printk("descending loop >= stride 3\n");
+    }
+
+    for (int i=0;i!=5000;i++) {
+      bpf_printk("ascending loop !=\n");
+    }
+
+    for (int i=0;i!=5000;i+=3) {
+      bpf_printk("ascending loop != stride 3 (bad bounds!)\n");
     }
     return 0;
 }

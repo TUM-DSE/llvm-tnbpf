@@ -1063,19 +1063,119 @@ template <typename LoopStmt> static bool hasEmptyLoopBody(const LoopStmt &S) {
 
 static std::atomic<unsigned long long> loop_id = 0;
 
-static void pcSectionTagInstr(llvm::LLVMContext &context, llvm::MDBuilder &mb, std::string name, llvm::Instruction *instr, uint64_t loop_number) {
+//TODO: Move these conditions somewhere more accessible
 
+enum PCSLoopInfoType {
+    forloop_cond_branch,
+    forloop_cond_before,
+    forloop_cond_instr,
+    forloop_body_begin,
+    forloop_body_br,
+    forloop_incr_begin,
+    forloop_incr_br,
+
+    whileloop_cond_before,
+    whileloop_cond_branch,
+    whileloop_cond_instr,
+    whileloop_body_begin,
+    whileloop_body_br
+};
+
+struct LoopTemplate {
+    uint64_t loop_number = 0;
+    int64_t start = 0;
+    int64_t finish = 0;
+    int64_t stride = 0;
+    enum ComparisonType {
+      //Bitmasking enabled comparison enum
+      //        < = >
+      FALSE,  //0 0 0
+      GT,     //0 0 1
+      EQ,     //0 1 0
+      GEQ,    //0 1 1
+      LT,     //1 0 0
+      NEQ,    //1 0 1
+      LEQ,    //1 1 0
+      TRUE,   //1 1 1
+      C_UNK,
+    };
+    ComparisonType comp_type = C_UNK;
+    enum LoopType {
+      L_UNK,
+      FOR,
+      WHILE,
+      DO
+    };
+    LoopType loop_type = L_UNK;
+    bool loopIsAscending = false;
+    bool loopTerminates = false;
+    bool loopDirectionKnown = false;
+    bool loopStartKnown = false;
+    bool loopFinishKnown = false;
+    bool loopStrideKnown = false;
+    bool loopTerminationKnown = false;
+};
+
+static void pcSectionTagInstr(llvm::LLVMContext &context, llvm::MDBuilder &mb, PCSLoopInfoType info_type, llvm::Instruction *instr, uint64_t loop_number) {
+  auto loop_name = std::string("_loopdb");
+  const auto module_name = instr->getModule()->getModuleIdentifier();
+  loop_name.insert(0, module_name);
+  auto old_mdnode = instr->getMetadata("pcsections");
   llvm::MDNode *node = mb.createPCSections({
-    {name, {llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, loop_number))}}
+        {loop_name, {
+          llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, loop_number)),
+          llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, info_type)),
+        }}
   });
-
+  if (old_mdnode) {
+    node = llvm::MDNode::concatenate(old_mdnode, node);
+  }
   instr->setMetadata("pcsections", node);
+}
+
+static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder mb, LoopTemplate templ, llvm::Function *func) {
+  auto loop_name = std::string("_loopdb_class");
+  //TODO: this is an extremely hacky way to get the module from the function and breaks if the function is currently empty
+  const auto module_name = func->begin()->getModule()->getModuleIdentifier();
+  loop_name.insert(0, module_name);
+
+  auto old_mdnode = func->getMetadata("pcsections");
+  auto i64t = llvm::Type::getInt64Ty(context);
+  auto i16t = llvm::Type::getInt16Ty(context);
+  auto i1t = llvm::Type::getInt1Ty(context);
+  // TODO: This is an absolutely horrible way to specify the type
+  // Does LLVM have some sort of type annotation that auto-creates LLVM struct
+  // types from regular host struct decls?
+  llvm::MDNode *node = mb.createPCSections({
+        {loop_name, {llvm::ConstantStruct::getAnon({
+          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.loop_number)),
+          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.start)),
+          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.finish)),
+          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.stride)),
+          llvm::Constant::getIntegerValue(i16t, llvm::APInt(16, templ.comp_type)),
+          llvm::Constant::getIntegerValue(i16t, llvm::APInt(16, templ.loop_type)),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopIsAscending)),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopTerminates)),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopDirectionKnown)),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopStartKnown)),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopFinishKnown)),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopStrideKnown)),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopTerminationKnown)),
+        })}}
+  });
+  if (old_mdnode) {
+    node = llvm::MDNode::concatenate(old_mdnode, node);
+  }
+  func->setMetadata("pcsections", node);
 }
 
 void CodeGenFunction::EmitWhileStmt(const WhileStmt &S,
                                     ArrayRef<const Attr *> WhileAttrs) {
   // Emit the header for the loop, which will also become
   // the continue target.
+
+
+
   JumpDest LoopHeader = getJumpDestInCurrentScope("while.cond");
   EmitBlock(LoopHeader.getBlock());
 
@@ -1254,7 +1354,6 @@ void CodeGenFunction::EmitDoStmt(const DoStmt &S,
       addInstToNewSourceAtom(CondI, nullptr);
     addInstToNewSourceAtom(I, nullptr);
   }
-
   LoopStack.pop();
 
   if (LoopFalse != LoopExit.getBlock()) {
@@ -1281,6 +1380,10 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
 
   unsigned long long cur_loop_id = loop_id.fetch_add(1);
   JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
+
+  LoopTemplate loop_info;
+  loop_info.loop_number = cur_loop_id;
+  loop_info.loop_type = LoopTemplate::LoopType::FOR;
 
   std::optional<LexicalScope> ForScope;
   if (getLangOpts().C99 || getLangOpts().CPlusPlus)
@@ -1371,10 +1474,10 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
 
 
     auto *I = Builder.CreateCondBr(BoolCondVal, ForBody, ExitBlock, Weights);
-    pcSectionTagInstr(con, mb, "forloop_cond_branch", I, cur_loop_id);
+    pcSectionTagInstr(con, mb, forloop_cond_branch , I, cur_loop_id);
 
     auto BeforeCond = &Builder.GetInsertBlock()->front();
-    pcSectionTagInstr(con, mb, "forloop_condition_before", BeforeCond, cur_loop_id);
+    pcSectionTagInstr(con, mb, forloop_cond_before, BeforeCond, cur_loop_id);
 
     // Key Instructions: Emit the condition and branch as separate atoms to
     // match existing loop stepping behaviour. FIXME: We could have the branch
@@ -1384,7 +1487,8 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
       addInstToNewSourceAtom(CondI, nullptr);
       // TODO: this apparently fails to trigger, we probably need to mess with
       // the condition builder
-      pcSectionTagInstr(con, mb, "forloop_cond_instr", CondI, cur_loop_id);
+      pcSectionTagInstr(con, mb, forloop_cond_instr, CondI, cur_loop_id);
+
     }
 
     addInstToNewSourceAtom(I, nullptr);
@@ -1411,7 +1515,7 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
     auto BeforeBodyBlock = Builder.GetInsertBlock();
     EmitStmt(S.getBody());
     auto BeforeBody = &BeforeBodyBlock->front();
-    pcSectionTagInstr(con, mb, "forloop_body_begin", BeforeBody, cur_loop_id);
+    pcSectionTagInstr(con, mb, forloop_body_begin, BeforeBody, cur_loop_id);
   }
 
   // The last block in the loop's body (which unconditionally branches to the
@@ -1422,12 +1526,12 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   bool did_incr_branch = S.getInc();
   if (did_incr_branch) {
     EmitBlock(Continue.getBlock());
-    pcSectionTagInstr(con, mb, "forloop_body_br", FinalBodyBB->getTerminator(), cur_loop_id);
+    pcSectionTagInstr(con, mb, forloop_body_br, FinalBodyBB->getTerminator(), cur_loop_id);
     //
     auto BeforeIncBlock = Builder.GetInsertBlock();
     EmitStmt(S.getInc());
     auto BeforeInc = &BeforeIncBlock->front();
-    pcSectionTagInstr(con, mb, "forloop_incr_begin", BeforeInc, cur_loop_id);
+    pcSectionTagInstr(con, mb, forloop_incr_begin, BeforeInc, cur_loop_id);
   }
 
   BreakContinueStack.pop_back();
@@ -1445,7 +1549,7 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
   } else {
     // Otherwise, create a fall-through branch.
     auto BodyBr = Builder.CreateBr(CondBlock);
-    pcSectionTagInstr(con, mb,  did_incr_branch ? "forloop_incr_br" : "forloop_body_br", BodyBr, cur_loop_id);
+    pcSectionTagInstr(con, mb,  did_incr_branch ? forloop_incr_br : forloop_body_br, BodyBr, cur_loop_id);
   }
 
   Builder.ClearInsertionPoint();
@@ -1466,6 +1570,9 @@ void CodeGenFunction::EmitForStmt(const ForStmt &S,
     // match existing behaviour.
     addInstToNewSourceAtom(FinalBodyBB->getTerminator(), nullptr);
   }
+
+  //Last thing we do inside the for statement:
+  pcSectionLoopClassifyTag(con, mb, loop_info, Builder.GetInsertBlock()->getParent());
 }
 
 void
