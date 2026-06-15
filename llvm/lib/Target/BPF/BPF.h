@@ -13,6 +13,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
+Wew#include "llvm/Analysis/LoopPass.h"
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
@@ -33,6 +34,8 @@ FunctionPass *createBPFMIPreEmitPeepholePass();
 FunctionPass *createBPFMIPreEmitCheckingPass();
 FunctionPass *createBPFSimplePass();
 
+LoopPass *createBPFLoopTaggingPass();
+
 InstructionSelector *createBPFInstructionSelector(const BPFTargetMachine &,
                                                   const BPFSubtarget &,
                                                   const BPFRegisterBankInfo &);
@@ -45,6 +48,7 @@ void initializeBPFMIPreEmitCheckingPass(PassRegistry &);
 void initializeBPFMIPreEmitPeepholePass(PassRegistry &);
 void initializeBPFMISimplifyPatchablePass(PassRegistry &);
 void initializeBPFSimplePass(PassRegistry &);
+void initializeBPFLoopTaggingPass(PassRegistry &);
 
 class BPFAbstractMemberAccessPass
     : public PassInfoMixin<BPFAbstractMemberAccessPass> {

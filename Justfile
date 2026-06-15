@@ -10,7 +10,7 @@ configure:
     cd build
     cmake -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra;lld" \
         -DLLVM_TARGETS_TO_BUILD="BPF" \
-        -DCMAKE_BUILD_TYPE="Release" \
+        -DCMAKE_BUILD_TYPE="Debug" \
         -DLLVM_ENABLE_ASSERTIONS="ON" \
         -DCMAKE_EXPORT_COMPILE_COMMANDS="ON" \
         -DLLVM_CCACHE_BUILD="ON" \
