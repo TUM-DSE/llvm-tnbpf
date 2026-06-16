@@ -13,7 +13,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
-Wew#include "llvm/Analysis/LoopPass.h"
+#include "llvm/Analysis/LoopPass.h"
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
