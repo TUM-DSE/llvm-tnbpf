@@ -3,6 +3,7 @@
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
+  /*
     for (int i=0;i<5000;i++) {
       bpf_printk("ascending loop <\n");
     }
@@ -36,6 +37,12 @@ int hello_world(void *ctx) {
     for (int i=0;i!=5000;i+=3) {
       bpf_printk("ascending loop != stride 3 (bad bounds!)\n");
     }
+    */
+    int *unk = (int *)ctx;
+    for (unsigned int i=0;i<unk[0] && i < 500;i++) {
+      bpf_printk("variant loop\n");
+    }
+
     return 0;
 }
 
