@@ -30,11 +30,12 @@ enum PCSLoopInfoType {
     loop_body_begin,
 };
 
-struct LoopTemplate {
-    uint64_t loop_number = 0;
-    int64_t start = 0;
-    int64_t finish = 0;
-    int64_t stride = 0;
+class LoopTemplate {
+public:
+    uint64_t loop_number;
+    std::optional<int64_t> start = {};
+    std::optional<int64_t> finish = {};
+    std::optional<int64_t> stride = {};
     enum ComparisonType {
       //Bitmasking enabled comparison enum
       //        < = >
@@ -49,13 +50,14 @@ struct LoopTemplate {
       C_UNK,
     };
     ComparisonType comp_type = C_UNK;
-    bool loopIsAscending = false;
-    bool loopTerminates = false;
-    bool loopDirectionKnown = false;
-    bool loopStartKnown = false;
-    bool loopFinishKnown = false;
-    bool loopStrideKnown = false;
-    bool loopTerminationKnown = false;
+    std::optional<bool> loopIsAscending= {};
+    std::optional<bool> loopTerminates= {};
+    std::optional<uint64_t> exact_exit_count= {};
+    std::optional<uint64_t> constant_max_exit_count= {};
+
+    LoopTemplate() {
+      this->loop_number = loop_id.fetch_add(1);
+    }
 };
 
 static void pcSectionTagInstr(llvm::LLVMContext &context, llvm::MDBuilder &mb, PCSLoopInfoType info_type, llvm::Instruction *instr, uint64_t loop_number) {
@@ -91,18 +93,18 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
   llvm::MDNode *node = mb.createPCSections({
         {loop_name, {llvm::ConstantStruct::getAnon({
           llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.loop_number)),
-          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.start)),
-          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.finish)),
-          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.stride)),
+          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.start.value_or(0))),
+          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.finish.value_or(0))),
+          llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.stride.value_or(0))),
           llvm::Constant::getIntegerValue(i16t, llvm::APInt(16, templ.comp_type)),
           //llvm::Constant::getIntegerValue(i16t, llvm::APInt(16, templ.loop_type)),
-          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopIsAscending)),
-          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopTerminates)),
-          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopDirectionKnown)),
-          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopStartKnown)),
-          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopFinishKnown)),
-          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopStrideKnown)),
-          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopTerminationKnown)),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopIsAscending.value_or(false))),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopTerminates.value_or(false))),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopIsAscending.has_value())),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.start.has_value())),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.finish.has_value())),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.stride.has_value())),
+          llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.loopTerminates.has_value())),
         })}}
   });
   if (old_mdnode) {
@@ -169,6 +171,11 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
       auto sym_max_end = SE.getSymbolicMaxBackedgeTakenCount(L);
       LLVM_DEBUG(dbgs() << "symbolic max exit count: ");
       LLVM_DEBUG(sym_max_end->print(dbgs()));
+      for (auto operand : sym_max_end->operands()) {
+        LLVM_DEBUG(dbgs() << "operand: ");
+        LLVM_DEBUG(operand.print(dbgs()));
+        LLVM_DEBUG(dbgs() << "\n");
+      }
       LLVM_DEBUG(dbgs() << "\n");
       LLVM_DEBUG(dbgs() << "end bpf loop pass on loop:" << "\n");
       return false;

@@ -38,8 +38,11 @@ int hello_world(void *ctx) {
       bpf_printk("ascending loop != stride 3 (bad bounds!)\n");
     }
     */
-    int *unk = (int *)ctx;
-    for (unsigned int i=0;i<unk[0] && i < 500;i++) {
+    unsigned int *unk = (unsigned int *)ctx;
+    unsigned int a, b;
+    a = unk[0];
+    b = unk[1];
+    for (unsigned int i=0;i<a && i < 500;i++) {
       bpf_printk("variant loop\n");
     }
 
