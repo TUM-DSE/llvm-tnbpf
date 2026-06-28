@@ -34,6 +34,7 @@ add_llvm_target(BPFCodeGen
   BPFISelDAGToDAG.cpp
   BPFISelLowering.cpp
         BPFLoopTagging.cpp
+        SCEVCanonicalPrintVisitor.cpp
   BPFMCInstLower.cpp
   BPFPreserveDIType.cpp
   BPFPreserveStaticOffset.cpp
