@@ -168,7 +168,7 @@ class SymbolicBoundTranslationTable {
       entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, loop_number)));
       //first, embed the string itself
       entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, this->getResultString().size())));
-      entries.push_back(ConstantDataArray::getString(context, getResultString()));
+      entries.push_back(ConstantDataArray::getString(context, getResultString(), false));
       //now, we need to encode our table
       entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, this->dependencies.size())));
 
