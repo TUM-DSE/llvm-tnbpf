@@ -36,7 +36,7 @@ enum PCSLoopInfoType {
 
 class SymbolicBoundTranslationTableEntry {
 private:
-  virtual llvm::Constant *emitToTable(llvm::LLVMContext &context);
+  virtual llvm::Constant *emitToTable(llvm::LLVMContext &context, llvm::DataLayout &dl);
   virtual uint64_t getEntryType();
 public:
     enum EntryTypes {
@@ -45,12 +45,12 @@ public:
       FunctionParameter
     };
 
-  llvm::Constant *getTableEntry(llvm::LLVMContext &context) {
+  llvm::Constant *getTableEntry(llvm::LLVMContext &context, llvm::DataLayout &dl) {
 
     return llvm::ConstantStruct::getAnon({
       llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, getEntryType())),
-      emitToTable(context)
-    });
+      emitToTable(context, dl)
+    }, true);
   }
   virtual ~SymbolicBoundTranslationTableEntry() {};
 
@@ -60,7 +60,7 @@ public:
 class SBTFunctionArgEntry : public SymbolicBoundTranslationTableEntry {
   llvm::Argument *arg;
 private:
-  llvm::Constant *emitToTable(llvm::LLVMContext &context) override {
+  llvm::Constant *emitToTable(llvm::LLVMContext &context, llvm::DataLayout &dl) override {
     return llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, arg->getArgNo()));
   }
   uint64_t getEntryType() override {
@@ -75,7 +75,7 @@ class SBTInstructionEntry : public SymbolicBoundTranslationTableEntry {
 
 llvm::Instruction *inst;
 private:
-  llvm::Constant *emitToTable(llvm::LLVMContext &context) override {
+  llvm::Constant *emitToTable(llvm::LLVMContext &context, llvm::DataLayout &dl) override {
     llvm::MDBuilder mb(context);
     uint64_t inst_tag_id = sym_ref_instruction_id.fetch_add(1);
     auto loop_name = std::string("_sym_instr_db");
@@ -109,9 +109,13 @@ class SBTConstantEntry : public SymbolicBoundTranslationTableEntry {
 
 llvm::Constant *c;
 private:
-  llvm::Constant *emitToTable(llvm::LLVMContext &context) override {
+  llvm::Constant *emitToTable(llvm::LLVMContext &context, llvm::DataLayout &dl) override {
     //TODO: if c is a global constant value, this just copies the whole entire global constant to c
-    return c;
+    return llvm::ConstantStruct::getAnon({
+      llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, dl.getTypeAllocSize(c->getType()))),
+      //TODO: no idea how to handle embedding non integer types
+      c
+    }, true);
   }
   uint64_t getEntryType() override {
     return EntryTypes::Constant;
@@ -171,13 +175,13 @@ class SymbolicBoundTranslationTable {
       entries.push_back(ConstantDataArray::getString(context, getResultString(), false));
       //now, we need to encode our table
       entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, this->dependencies.size())));
-
+      auto dl = function_to_tag->begin()->getModule()->getDataLayout();
       for (auto dep : dependencies) {
-        auto to_emit = dep->getTableEntry(context);
+        auto to_emit = dep->getTableEntry(context, dl);
         // https://stackoverflow.com/a/14608251
         // More specifically, https://stackoverflow.com/questions/14608250/how-can-i-find-the-size-of-a-type#comment125528828_14608251
-        uint64_t const_size = function_to_tag->begin()->getModule()->getDataLayout().getTypeAllocSize(to_emit->getType());
-        entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, const_size)));
+        //uint64_t const_size = function_to_tag->begin()->getModule()->getDataLayout().getTypeAllocSize(to_emit->getType());
+        //entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, const_size)));
         entries.push_back(to_emit);
       }
 
@@ -271,6 +275,7 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
   // TODO: This is an absolutely horrible way to specify the type
   // Does LLVM have some sort of type annotation that auto-creates LLVM struct
   // types from regular host struct decls?
+  //TODO: don't know if this should be packed or unpacked
   llvm::MDNode *node = mb.createPCSections({
         {loop_name, {llvm::ConstantStruct::getAnon({
           llvm::Constant::getIntegerValue(i64t, llvm::APInt(64, templ.loop_number)),

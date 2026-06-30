@@ -39,11 +39,16 @@ int hello_world(void *ctx) {
     }
     */
     unsigned int *unk = (unsigned int *)ctx;
-    unsigned int a, b;
+    unsigned int a;
     a = unk[0];
-    b = unk[1];
-    for (unsigned int i=0;i<a && i < 500;i++) {
-      bpf_printk("variant loop\n");
+
+    int n = 10;
+    if (a) {
+      bpf_printk("branch side effect\n");
+      n = 20;
+    }
+    for (int i=0;i<n;i++) {
+      bpf_printk("phi loop !=\n");
     }
 
     return 0;
