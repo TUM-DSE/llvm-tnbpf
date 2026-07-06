@@ -156,7 +156,7 @@ void BPFPassConfig::addIRPasses() {
   addPass(createAtomicExpandLegacyPass());
   addPass(createBPFCheckAndAdjustIR());
   addPass(createBPFLoopTaggingPass());
-
+  addPass(createBPFFunctionTaggingPass());
   TargetPassConfig::addIRPasses();
 }
 
