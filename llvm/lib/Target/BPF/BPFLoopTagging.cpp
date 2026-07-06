@@ -296,7 +296,7 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
           llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.exact_exit_count.has_value())),
           llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.constant_max_exit_count.has_value())),
           llvm::Constant::getIntegerValue(i1t, llvm::APInt(1, templ.translation_table.has_value()))
-        })}}
+        }, true)}}
   });
   if (old_mdnode) {
     node = llvm::MDNode::concatenate(old_mdnode, node);
