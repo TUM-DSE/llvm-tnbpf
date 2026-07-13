@@ -175,6 +175,7 @@ bool BPFPassConfig::addInstSelector() {
 
 void BPFPassConfig::addPreEmitPass2() {
   addPass(createBPFSimplePass());
+
   addPass(createBPFInstructionRegisterTaggingPass());
 }
 
@@ -197,6 +198,8 @@ void BPFPassConfig::addPreEmitPass() {
   if (getOptLevel() != CodeGenOptLevel::None)
     if (!DisableMIPeephole)
       addPass(createBPFMIPreEmitPeepholePass());
+
+
 }
 
 bool BPFPassConfig::addIRTranslator() {

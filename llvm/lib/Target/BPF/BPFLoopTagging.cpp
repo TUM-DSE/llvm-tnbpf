@@ -17,6 +17,8 @@
 #include <atomic>
 
 #include "BPFPCSectionHelpers.h"
+
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #define DEBUG_TYPE "bpf-loop-tagging"
 
 using namespace llvm;

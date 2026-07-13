@@ -9,6 +9,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 using namespace llvm;
 
 namespace {
@@ -21,6 +22,7 @@ namespace {
       LLVM_DEBUG(dbgs() << "begin BPF instruction register tagging pass\n");
       auto &LC = MF.getFunction().getContext();
       auto module = MF.getFunction().begin()->getModule();
+      MachineRegisterInfo reg_info(&MF);
 
       auto sym_db_name = std::string("_sym_instr_db");
       const auto module_name = module->getModuleIdentifier();
@@ -44,11 +46,22 @@ namespace {
                 auto old_instr_register = dyn_cast<ConstantAsMetadata>(symdb_entry->getOperand(1).get());
                 auto integer_const = dyn_cast<ConstantInt>(old_instr_register->getValue());
                 LLVM_DEBUG(dbgs() << "old integer value: " << *integer_const->getValue().getRawData() << "\n");
-                //TODO: check if this becomes 12345 in pcsections
-                symdb_entry->replaceOperandWith(1, ConstantAsMetadata::get(
-                llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(LC), llvm::APInt(64, 12345))
-                ));
-              }
+                if (I.getNumDefs() == 1) {
+                  //TODO: probably a terrible way to do this but good enough for now
+                  for (auto op : I.all_defs()) {
+                    if (op.isDef()) {
+                      symdb_entry->replaceOperandWith(1, ConstantAsMetadata::get(
+                        llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(LC), llvm::APInt(64, op.getReg().id()))
+                      ));
+
+                      break;
+                    }
+
+                  }
+
+                }
+                }
+
             }
             for (int i=0;i<pc_sections->getNumOperands();i+=2) {
               auto &name = pc_sections->getOperand(i);
