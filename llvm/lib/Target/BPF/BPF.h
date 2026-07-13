@@ -34,6 +34,7 @@ FunctionPass *createBPFMIPreEmitPeepholePass();
 FunctionPass *createBPFMIPreEmitCheckingPass();
 FunctionPass *createBPFSimplePass();
 FunctionPass *createBPFFunctionTaggingPass();
+FunctionPass *createBPFInstructionRegisterTaggingPass();
 
 LoopPass *createBPFLoopTaggingPass();
 
@@ -51,6 +52,7 @@ void initializeBPFMISimplifyPatchablePass(PassRegistry &);
 void initializeBPFSimplePass(PassRegistry &);
 void initializeBPFLoopTaggingPass(PassRegistry &);
 void initializeBPFFunctionTaggingPass(PassRegistry &);
+void initializeBPFInstructionRegisterTaggingPass(PassRegistry &);
 
 class BPFAbstractMemberAccessPass
     : public PassInfoMixin<BPFAbstractMemberAccessPass> {

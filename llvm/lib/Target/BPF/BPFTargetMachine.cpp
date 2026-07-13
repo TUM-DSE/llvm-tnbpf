@@ -175,6 +175,7 @@ bool BPFPassConfig::addInstSelector() {
 
 void BPFPassConfig::addPreEmitPass2() {
   addPass(createBPFSimplePass());
+  addPass(createBPFInstructionRegisterTaggingPass());
 }
 
 void BPFPassConfig::addMachineSSAOptimization() {

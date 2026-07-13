@@ -24,12 +24,12 @@ namespace {
   public:
 
     bool runOnMachineFunction(MachineFunction &M) override {
-      LLVM_DEBUG(dbgs() << "begin bpf simple pass debug" << "\n");
+      //LLVM_DEBUG(dbgs() << "begin bpf simple pass debug" << "\n");
       M.print(dbgs());
       auto &LC = M.getFunction().getContext();
       MDBuilder MB(LC);
       for (auto &x : M) {
-        LLVM_DEBUG(dbgs() << "Machine Basic Block: " << x << "\n");
+        //LLVM_DEBUG(dbgs() << "Machine Basic Block: " << x << "\n");
         for (auto &y : x) {
           // https://stackoverflow.com/a/13816135
           if (y.isBranch()) {
@@ -40,10 +40,10 @@ namespace {
           if (y.getPCSections()) {
               //do stuff with PC sectio
           }
-          LLVM_DEBUG(dbgs() << "Machine Instr: " << y << "\n");
+          //LLVM_DEBUG(dbgs() << "Machine Instr: " << y << "\n");
         }
       }
-      LLVM_DEBUG(dbgs() << "end bpf simple pass debug" << "\n");
+      //LLVM_DEBUG(dbgs() << "end bpf simple pass debug" << "\n");
       return false;
     }
 

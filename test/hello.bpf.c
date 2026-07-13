@@ -40,15 +40,23 @@ int hello_world(void *ctx) {
     */
     unsigned int *unk = (unsigned int *)ctx;
     unsigned int a;
+    unsigned int b;
     a = unk[0];
+    b = unk[1];
 
     int n = 10;
     if (a) {
       bpf_printk("branch side effect\n");
       n = 20;
     }
-    for (int i=0;i<n;i++) {
+    for (int i=a;i<n;i++) {
       bpf_printk("phi loop !=\n");
+    }
+    for (int i=b;i<500;i++) {
+      bpf_printk("other instruction bound loop\n");
+    }
+    for (int i=b;i<125;i++) {
+      bpf_printk("duplicate instruction bound loop\n");
     }
 
     return 0;
