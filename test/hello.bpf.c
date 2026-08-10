@@ -26,10 +26,11 @@ int hello_world(void *ctx) {
     for (int i=5000;i>0;i-=3) {
       bpf_printk("descending loop > stride 3\n");
     }
+    */
     for (int i=5000;i>=0;i-=3) {
       bpf_printk("descending loop >= stride 3\n");
     }
-
+    /*
     for (int i=0;i!=5000;i++) {
       bpf_printk("ascending loop !=\n");
     }
@@ -38,6 +39,7 @@ int hello_world(void *ctx) {
       bpf_printk("ascending loop != stride 3 (bad bounds!)\n");
     }
     */
+  /*
     unsigned int *unk = (unsigned int *)ctx;
     unsigned int a;
     unsigned int b;
@@ -58,6 +60,7 @@ int hello_world(void *ctx) {
     for (int i=b;i<125;i++) {
       bpf_printk("duplicate instruction bound loop\n");
     }
+    */
 
     return 0;
 }

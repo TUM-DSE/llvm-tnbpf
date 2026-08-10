@@ -5,8 +5,76 @@
 #include "SCEVCanonicalPrintVisitor.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/InterleavedRange.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
 namespace llvm {
-SCEVCanonicalPrintVisitor::SCEVCanonicalPrintVisitor() : OS(StringResult) {}
+
+void SCEVCanonicalPrintVisitor::measure(const SCEV *start, const SCEV *end,
+                                        const SCEV *stride) {
+  /*
+  case Loop::LoopBounds::Direction::Increasing:
+  measure_scev = SE.getUDivCeilSCEV(SE.getMinusSCEV(end_scev, iv), stride_scev);
+  break;
+
+  case Loop::LoopBounds::Direction::Unknown:
+  break;
+  */
+  auto iv_scev = SE.getSCEV(iv);
+
+  //extremely hacky technique to bypass SCEV's own insistence to transform the PHI node into an AddRec
+  iv_being_bootstrapped = true;
+  //TODO: maybe instead of doing this: just set iv to %iv and handle separately, still have no clue how to tag this with a register
+  printValue(iv);
+  OS.flush();
+  iv_string = StringResult;
+  StringResult = "";
+
+
+
+
+  if (isKnownNegativeInLoop(stride, this->loop, SE)) {
+
+     //calculate iteration number string the hard way
+     //TODO: this does not use SCEV itself
+
+    // stride should be invariant, otherwise we have a big problem
+    // TODO: haven't got the slightest clue how we deal with polynomials
+    // in general: SCEV seems to work with iteration numbers
+    // don't know how to reverse engineer the iteration number from the iv in the general case
+    // assume iv is in form of start + step * stride with stride invariant
+    OS << "((";
+    visit(start);
+    OS << " - ";
+    OS << iv_string;
+    OS << ") /u (-";
+    visit(stride);
+    OS << "))";
+
+    OS.flush();
+    iter_no_string = StringResult;
+    StringResult = "";
+
+    iv_being_bootstrapped = false;
+     this->visit(SE.getUDivCeilSCEV(SE.getMinusSCEV(iv_scev, end), SE.getNegativeSCEV(stride)));
+
+  } else {
+    OS << "((";
+    OS << iv_string;
+    OS << " - ";
+    visit(start);
+    OS << ") /u ";
+    visit(stride);
+    OS << ")";
+
+    OS.flush();
+    iter_no_string = StringResult;
+    StringResult = "";
+    iv_being_bootstrapped = false;
+    this->visit(SE.getUDivCeilSCEV(SE.getMinusSCEV(end, iv_scev), stride));
+  }
+
+}
+
+SCEVCanonicalPrintVisitor::SCEVCanonicalPrintVisitor(ScalarEvolution &SE, Loop *loop, PHINode *iv) : OS(StringResult), iv_string(""), SE(SE), loop(loop), iv(iv), iv_being_bootstrapped(false) {}
 const std::pair<std::vector<Value *>, std::string>
 SCEVCanonicalPrintVisitor::collectResults() {
   return std::pair(this->Result, this->StringResult);
@@ -105,23 +173,64 @@ switch (S->getSCEVType()) {
   }
   case scAddRecExpr: {
     const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
-    OS << "{";
-    visit(AR->getOperand(0));
-    for (unsigned i = 1, e = AR->getNumOperands(); i != e; ++i) {
-      OS << ",+,";
-      visit(AR->getOperand(i));
+
+    // convert AddRec back into regular Add
+    if (iv_being_bootstrapped) {
+      OS << "***ERROR: ADDREC INVOKED WHILE DERIVING ITERATION NUMBER ***";
+      return;
     }
 
-    OS << "}<";
+    // flatten the addrec outright
+    // lifted from SCEVAddRecExpr::evaluateAtIteration
+    /*
+    const SCEV *Result = Operands[0].getPointer();
+    for (unsigned i = 1, e = Operands.size(); i != e; ++i) {
+      // The computation is correct in the face of overflow provided that the
+      // multiplication is performed _after_ the evaluation of the binomial
+      // coefficient.
+      const SCEV *Coeff = BinomialCoefficient(It, i, SE, Result->getType());
+      if (isa<SCEVCouldNotCompute>(Coeff))
+        return Coeff;
+
+      Result =
+          SE.getAddExpr(Result, SE.getMulExpr(Operands[i].getPointer(), Coeff));
+    }
+    */
+    //   BC(It, K) = (It * (It - 1) * ... * (It - K + 1)) / K!
+
+
+
+
+    OS << "(";
+    visit(AR->getOperand(0));
+
+
+    if (AR->getNumOperands() > 0) {
+      OS << " + (";
+      visit(AR->getOperand(1));
+      OS << " * " << iter_no_string << ")";
+    }
+    unsigned k_fac = 1;
+    std::string it_chain = iter_no_string;
+    //TODO: no idea if this works for arbitrary polynomials - no idea if it even needs to
+    for (unsigned i = 2, e = AR->getNumOperands(); i != e; ++i) {
+      k_fac *= i;
+      it_chain += " * (" + iter_no_string + " - " + std::to_string(i - 1) + ")";
+      OS << " + (";
+      visit(AR->getOperand(i));
+      OS << " * ((" + it_chain + ") /u " + std::to_string(k_fac) + ")";
+    }
+
+    OS << ")";
+
+
     if (AR->hasNoUnsignedWrap())
-      OS << "nuw><";
+      OS << "<nuw>";
     if (AR->hasNoSignedWrap())
-      OS << "nsw><";
+      OS << "<nsw>";
     if (AR->hasNoSelfWrap() && !AR->hasNoUnsignedWrap() &&
         !AR->hasNoSignedWrap())
-      OS << "nw><";
-    printValue(AR->getLoop()->getHeader());
-    OS << ">";
+      OS << "<nw>";
     return;
   }
   case scAddExpr:

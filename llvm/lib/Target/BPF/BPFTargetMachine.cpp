@@ -155,9 +155,9 @@ void BPFTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB) {
 void BPFPassConfig::addIRPasses() {
   addPass(createAtomicExpandLegacyPass());
   addPass(createBPFCheckAndAdjustIR());
+  TargetPassConfig::addIRPasses();
   addPass(createBPFLoopTaggingPass());
   addPass(createBPFFunctionTaggingPass());
-  TargetPassConfig::addIRPasses();
 }
 
 TargetTransformInfo
