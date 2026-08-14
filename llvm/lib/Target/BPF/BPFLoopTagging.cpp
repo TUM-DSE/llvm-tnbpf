@@ -155,9 +155,9 @@ class SymbolicBoundTranslationTable {
     public:
 
     std::vector<Value *> original_values;
-    SymbolicBoundTranslationTable(ScalarEvolution &SE, Loop *loop, PHINode *iv, const SCEV *start, const SCEV *end, const SCEV *stride) : SE(SE) {
-        SCEVCanonicalPrintVisitor visitor(SE, loop, iv);
-        visitor.measure(start, end, stride);
+    SymbolicBoundTranslationTable(ScalarEvolution &SE, Loop *loop, PHINode *iv, const SCEV *start, const SCEV *end, const SCEV *stride, uint64_t l_id) : SE(SE) {
+        SCEVCanonicalPrintVisitor visitor(SE, loop, iv,  l_id);
+        visitor.measure(end, stride);
         auto results = visitor.collectResults();
         auto translation_map = results.first;
         //debugging purposes
@@ -292,9 +292,9 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
   LLVM_DEBUG(old_mdnode->printTree(dbgs()));
   LLVM_DEBUG(dbgs() << "\n");
 
-  auto i64t = llvm::Type::getInt64Ty(context);
-  auto i16t = llvm::Type::getInt16Ty(context);
-  auto i1t = llvm::Type::getInt1Ty(context);
+  //auto i64t = llvm::Type::getInt64Ty(context);
+  //auto i16t = llvm::Type::getInt16Ty(context);
+  //auto i1t = llvm::Type::getInt1Ty(context);
   // TODO: This is an absolutely horrible way to specify the type
   // Does LLVM have some sort of type annotation that auto-creates LLVM struct
   // types from regular host struct decls?
@@ -337,7 +337,7 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
       auto &context = L->getHeader()->getContext();
       LLVM_DEBUG(dbgs() << "begin bpf loop pass on loop:" << "\n");
       auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-      auto &loop_info = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+      //auto &loop_info = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
       auto &SE = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
       LLVM_DEBUG(dbgs() << "got analysis" << "\n");
 
@@ -353,13 +353,11 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
           proof.latches.push_back(pcSectionGetInstructionID(BB->getTerminator()));
         }
       }
-      LLVM_DEBUG(dbgs() << "print entire loop:" << "\n");
-      printLoop(*L, dbgs());
+
       auto lb = L->getBounds(SE);
       const SCEV *start_scev = nullptr;
       const SCEV *end_scev = nullptr;
       const SCEV *stride_scev = nullptr;
-      const SCEV *measure_scev = nullptr;
       if (lb.has_value()) {
         auto unpacked_lb = lb.value();
 
@@ -368,7 +366,11 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
         auto &end = unpacked_lb.getFinalIVValue();
         end_scev = SE.getSCEV(&end);
         auto step = unpacked_lb.getStepValue();
+
         stride_scev = SE.getSCEV(step);
+        LLVM_DEBUG(dbgs() << "stride scev: ");
+        LLVM_DEBUG(stride_scev->print(dbgs()));
+        LLVM_DEBUG(dbgs() << "\n");
 
         switch (unpacked_lb.getDirection()) {
         case Loop::LoopBounds::Direction::Increasing:
@@ -525,7 +527,7 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
         LLVM_DEBUG(dbgs() << "\n");
       }
       if (iv_val) {
-        SymbolicBoundTranslationTable *sym_max_measure_standardized = new SymbolicBoundTranslationTable(SE, L, iv_val, start_scev, end_scev, stride_scev);
+        SymbolicBoundTranslationTable *sym_max_measure_standardized = new SymbolicBoundTranslationTable(SE, L, iv_val, start_scev, end_scev, stride_scev, loop_meta.loop_number);
         loop_meta.translation_table_measure = sym_max_measure_standardized;
         LLVM_DEBUG(dbgs() << "symbolic max measure SCEV result string: " << sym_max_measure_standardized->getResultString() << "\n");
         LLVM_DEBUG(dbgs() << "results vector:\n");
@@ -552,7 +554,13 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
       } else {
         LLVM_DEBUG(dbgs() << "failed to get loop bounds" << "\n");
       }
-
+      LLVM_DEBUG(dbgs() << "print entire loop:" << "\n");
+      printLoop(*L, dbgs());
+      if (isFinite(L)) {
+        LLVM_DEBUG(dbgs() << "llvm says the loop is finite\n");
+      } else {
+        LLVM_DEBUG(dbgs() << "llvm does not say the loop is finite\n");
+      }
 
       return false;
     }

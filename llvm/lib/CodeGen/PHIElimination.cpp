@@ -39,6 +39,9 @@
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
@@ -232,7 +235,7 @@ bool PHIEliminationImpl::run(MachineFunction &MF) {
 
   MachineDomTreeUpdater MDTU(MDT, PDT,
                              MachineDomTreeUpdater::UpdateStrategy::Lazy);
-
+  LLVM_DEBUG(dbgs() << "PHI elimination begins\n");
   bool Changed = false;
 
   // Split critical edges to help the coalescer.
@@ -314,7 +317,7 @@ bool PHIEliminationImpl::EliminatePHINodes(MachineFunction &MF,
                                            MachineBasicBlock &MBB) {
   if (MBB.empty() || !MBB.front().isPHI())
     return false; // Quick exit for basic blocks without PHIs.
-
+  LLVM_DEBUG(dbgs() << "Eliminating PHI nodes in MBB\n");
   // Get an iterator to the last PHI node.
   MachineBasicBlock::iterator LastPHIIt =
       std::prev(MBB.SkipPHIsAndLabels(MBB.begin()));
@@ -363,11 +366,14 @@ void PHIEliminationImpl::LowerPHINode(MachineBasicBlock &MBB,
                                       bool AllEdgesCritical) {
   ++NumLowered;
 
+
   MachineBasicBlock::iterator AfterPHIsIt = std::next(LastPHIIt);
 
   // Unlink the PHI node from the basic block, but don't delete the PHI yet.
   MachineInstr *MPhi = MBB.remove(&*MBB.begin());
-
+  LLVM_DEBUG(dbgs() << "Lowering a PHI node: ");
+  LLVM_DEBUG(MPhi->print(dbgs()));
+  LLVM_DEBUG(dbgs() << "\n");
   unsigned NumSrcs = (MPhi->getNumOperands() - 1) / 2;
   Register DestReg = MPhi->getOperand(0).getReg();
   assert(MPhi->getOperand(0).getSubReg() == 0 && "Can't handle sub-reg PHIs");
@@ -416,6 +422,38 @@ void PHIEliminationImpl::LowerPHINode(MachineBasicBlock &MBB,
     // Give the target possiblity to handle special cases fallthrough otherwise
     PHICopy = TII->createPHIDestinationCopy(
         MBB, AfterPHIsIt, MPhi->getDebugLoc(), IncomingReg, DestReg);
+
+    //BPF PHI register tracking
+
+    auto pc_sections = MPhi->getPCSections();
+    if (pc_sections) {
+      LLVM_DEBUG(dbgs() << "bpf: found PHI node with PCSections\n");
+      auto bpf_tag_name = std::string("_BPF_internal_phi_linkage");
+      auto module = MF.getFunction().begin()->getModule();
+      const auto module_name = module->getModuleIdentifier();
+      bpf_tag_name.insert(0, module_name);
+      LLVM_DEBUG(dbgs() << "bpf: PCSections: ");
+      LLVM_DEBUG(pc_sections->printTree(dbgs()));
+      LLVM_DEBUG(dbgs() << "\n");
+      LLVM_DEBUG(dbgs() << "Operand count: " << pc_sections->getNumOperands() << "\n");
+      for (int i=0;i<pc_sections->getNumOperands();i+=2) {
+        auto &name = pc_sections->getOperand(i);
+
+        MDString *md_string = dyn_cast<MDString>(name.get());
+        LLVM_DEBUG(dbgs() << "Name: ");
+        LLVM_DEBUG(name->print(dbgs()));
+        LLVM_DEBUG(dbgs() << "\n");
+        if (md_string->getString().compare(bpf_tag_name) == 0) {
+          LLVM_DEBUG(dbgs() << "bpf: found PHI node with IV tag\n");
+          MDTuple *tag_entry = dyn_cast<MDTuple>(pc_sections->getOperand(i + 1).get());
+          auto loop_id_of_entry = dyn_cast<ConstantAsMetadata>(tag_entry->getOperand(0).get());
+          llvm::MDBuilder mb(module->getContext());
+
+          // TODO: Tag the terminator of the PHI's basic block (almost certainly a conditional branch) with the incoming register number and loop id.
+          // We will use it as a live-in register that contains the IV. It will be converted to the physical register in the pre-emit helper pass.
+        }
+      }
+    }
   }
 
   if (MPhi->peekDebugInstrNum()) {

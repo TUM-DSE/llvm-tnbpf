@@ -6,9 +6,15 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Support/InterleavedRange.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
+#include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/Module.h"
+#include "BPFPCSectionHelpers.h"
+
+#define DEBUG_TYPE "llvm_bpf_scev_printer"
+
 namespace llvm {
 
-void SCEVCanonicalPrintVisitor::measure(const SCEV *start, const SCEV *end,
+void SCEVCanonicalPrintVisitor::measure(const SCEV *end,
                                         const SCEV *stride) {
   /*
   case Loop::LoopBounds::Direction::Increasing:
@@ -18,63 +24,38 @@ void SCEVCanonicalPrintVisitor::measure(const SCEV *start, const SCEV *end,
   case Loop::LoopBounds::Direction::Unknown:
   break;
   */
-  auto iv_scev = SE.getSCEV(iv);
-
-  //extremely hacky technique to bypass SCEV's own insistence to transform the PHI node into an AddRec
-  iv_being_bootstrapped = true;
-  //TODO: maybe instead of doing this: just set iv to %iv and handle separately, still have no clue how to tag this with a register
-  printValue(iv);
-  OS.flush();
-  iv_string = StringResult;
-  StringResult = "";
-
-
-
-
+  auto iv_scev = SE.getUnknown(iv);
+  if (!SE.isLoopInvariant(stride, this->loop) || !SE.isLoopInvariant(end, this->loop)) {
+    OS << "*** ERROR - STRIDE OR END NOT LOOP INVARIANT ***";
+    return;
+  }
+  const SCEV *measure;
   if (isKnownNegativeInLoop(stride, this->loop, SE)) {
-
-     //calculate iteration number string the hard way
-     //TODO: this does not use SCEV itself
-
-    // stride should be invariant, otherwise we have a big problem
-    // TODO: haven't got the slightest clue how we deal with polynomials
-    // in general: SCEV seems to work with iteration numbers
-    // don't know how to reverse engineer the iteration number from the iv in the general case
-    // assume iv is in form of start + step * stride with stride invariant
-    OS << "((";
-    visit(start);
-    OS << " - ";
-    OS << iv_string;
-    OS << ") /u (-";
-    visit(stride);
-    OS << "))";
-
-    OS.flush();
-    iter_no_string = StringResult;
-    StringResult = "";
-
-    iv_being_bootstrapped = false;
-     this->visit(SE.getUDivCeilSCEV(SE.getMinusSCEV(iv_scev, end), SE.getNegativeSCEV(stride)));
-
+    measure = SE.getMinusSCEV(iv_scev, end);
   } else {
-    OS << "((";
-    OS << iv_string;
-    OS << " - ";
-    visit(start);
-    OS << ") /u ";
-    visit(stride);
-    OS << ")";
-
-    OS.flush();
-    iter_no_string = StringResult;
-    StringResult = "";
-    iv_being_bootstrapped = false;
-    this->visit(SE.getUDivCeilSCEV(SE.getMinusSCEV(end, iv_scev), stride));
+    measure = SE.getMinusSCEV(end, iv_scev);
   }
 
+  auto bpf_tag_name = std::string("_BPF_internal_phi_linkage");
+  auto module = iv->getModule();
+  const auto module_name = module->getModuleIdentifier();
+  bpf_tag_name.insert(0, module_name);
+
+  //tag iv with pcSection
+  MDNode *old_md = initOrGetPCSectionArrayInstruction(iv->getContext(), iv, bpf_tag_name);
+  MDNode *new_md = appendToPCSectionArray(iv->getContext(), bpf_tag_name, old_md, {
+    embedU64(iv->getContext(), loop_id)
+  });
+  iv->setMetadata("pcsections", new_md);
+
+  LLVM_DEBUG(dbgs() << "Tagged iv: ");
+  LLVM_DEBUG(iv->print(dbgs()));
+  LLVM_DEBUG(dbgs() << "\n");
+
+  this->visit(measure);
 }
 
-SCEVCanonicalPrintVisitor::SCEVCanonicalPrintVisitor(ScalarEvolution &SE, Loop *loop, PHINode *iv) : OS(StringResult), iv_string(""), SE(SE), loop(loop), iv(iv), iv_being_bootstrapped(false) {}
+SCEVCanonicalPrintVisitor::SCEVCanonicalPrintVisitor(ScalarEvolution &SE, Loop *loop, PHINode *iv, uint64_t loop_id) : OS(StringResult), iv(iv), loop(loop), SE(SE), loop_id(loop_id) {}
 const std::pair<std::vector<Value *>, std::string>
 SCEVCanonicalPrintVisitor::collectResults() {
   return std::pair(this->Result, this->StringResult);
@@ -172,65 +153,8 @@ switch (S->getSCEVType()) {
     return;
   }
   case scAddRecExpr: {
-    const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
-
-    // convert AddRec back into regular Add
-    if (iv_being_bootstrapped) {
-      OS << "***ERROR: ADDREC INVOKED WHILE DERIVING ITERATION NUMBER ***";
-      return;
-    }
-
-    // flatten the addrec outright
-    // lifted from SCEVAddRecExpr::evaluateAtIteration
-    /*
-    const SCEV *Result = Operands[0].getPointer();
-    for (unsigned i = 1, e = Operands.size(); i != e; ++i) {
-      // The computation is correct in the face of overflow provided that the
-      // multiplication is performed _after_ the evaluation of the binomial
-      // coefficient.
-      const SCEV *Coeff = BinomialCoefficient(It, i, SE, Result->getType());
-      if (isa<SCEVCouldNotCompute>(Coeff))
-        return Coeff;
-
-      Result =
-          SE.getAddExpr(Result, SE.getMulExpr(Operands[i].getPointer(), Coeff));
-    }
-    */
-    //   BC(It, K) = (It * (It - 1) * ... * (It - K + 1)) / K!
-
-
-
-
-    OS << "(";
-    visit(AR->getOperand(0));
-
-
-    if (AR->getNumOperands() > 0) {
-      OS << " + (";
-      visit(AR->getOperand(1));
-      OS << " * " << iter_no_string << ")";
-    }
-    unsigned k_fac = 1;
-    std::string it_chain = iter_no_string;
-    //TODO: no idea if this works for arbitrary polynomials - no idea if it even needs to
-    for (unsigned i = 2, e = AR->getNumOperands(); i != e; ++i) {
-      k_fac *= i;
-      it_chain += " * (" + iter_no_string + " - " + std::to_string(i - 1) + ")";
-      OS << " + (";
-      visit(AR->getOperand(i));
-      OS << " * ((" + it_chain + ") /u " + std::to_string(k_fac) + ")";
-    }
-
-    OS << ")";
-
-
-    if (AR->hasNoUnsignedWrap())
-      OS << "<nuw>";
-    if (AR->hasNoSignedWrap())
-      OS << "<nsw>";
-    if (AR->hasNoSelfWrap() && !AR->hasNoUnsignedWrap() &&
-        !AR->hasNoSignedWrap())
-      OS << "<nw>";
+    //const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(S);
+    OS << "***ERROR: ADDREC INVOKED - MEASURE CANNOT BE PROPERLY INVARIANT***";
     return;
   }
   case scAddExpr:
@@ -262,7 +186,7 @@ switch (S->getSCEVType()) {
     OS << "(";
     if (NAry->getNumOperands() > 0) {
       visit(NAry->getOperand(0));
-      for (int i=1;i<NAry->getNumOperands();i++) {
+      for (size_t i=1;i<NAry->getNumOperands();i++) {
         OS << OpStr;
         visit(NAry->getOperand(i));
       }
@@ -292,7 +216,13 @@ switch (S->getSCEVType()) {
     return;
   }
   case scUnknown: {
-    printValue(cast<SCEVUnknown>(S)->getValue());
+    Value *val = cast<SCEVUnknown>(S)->getValue();
+    if (val == this->iv) {
+      OS << "%iv";
+    } else {
+      printValue(val);
+    }
+
     return;
   }
   case scCouldNotCompute:

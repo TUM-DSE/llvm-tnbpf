@@ -20,17 +20,15 @@ protected:
   PHINode *iv;
   Loop *loop;
   ScalarEvolution &SE;
+  uint64_t loop_id;
 
 private:
   void printValue(Value *val);
   void visit(const SCEV *S);
-  bool iv_being_bootstrapped;
-  std::string iv_string;
-  std::string iter_no_string;
 
 public:
-  SCEVCanonicalPrintVisitor(ScalarEvolution &SE, Loop *loop, PHINode *iv);
-  void measure(const SCEV *start, const SCEV *end, const SCEV *stride);
+  SCEVCanonicalPrintVisitor(ScalarEvolution &SE, Loop *loop, PHINode *iv, uint64_t loop_id);
+  void measure(const SCEV *end, const SCEV *stride);
   const std::pair<std::vector<Value *>, std::string> collectResults();
   //TODO: test this function somehow, idk
   void printPhi(PHINode *phi);

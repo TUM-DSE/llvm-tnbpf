@@ -299,6 +299,10 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
       if (PN.getType()->isEmptyTy())
         continue;
 
+      LLVM_DEBUG(dbgs() << "BPF Tracing: Creating Machine PHI Node from: ");
+      LLVM_DEBUG(PN.print(dbgs()));
+      LLVM_DEBUG(dbgs() << "\n");
+
       DebugLoc DL = PN.getDebugLoc();
       Register PHIReg = ValueMap[&PN];
       assert(PHIReg && "PHI node does not have an assigned virtual register!");
@@ -309,7 +313,9 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
         unsigned NumRegisters = TLI->getNumRegisters(Fn->getContext(), VT);
         const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
         for (unsigned i = 0; i != NumRegisters; ++i)
-          BuildMI(MBB, DL, TII->get(TargetOpcode::PHI), PHIReg + i);
+          BuildMI(MBB, DL, TII->get(TargetOpcode::PHI), PHIReg + i)
+          /* Transfer PC Sections to newly built Machine PHI, so we can intercept them in a later part of the pipeline */
+          ->setPCSections(*MF, PN.getMetadata("pcsections"));
         PHIReg += NumRegisters;
       }
     }
