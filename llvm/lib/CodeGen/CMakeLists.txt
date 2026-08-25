@@ -170,6 +170,7 @@ add_llvm_component_library(LLVMCodeGen
   NonRelocatableStringpool.cpp
   OptimizePHIs.cpp
   PeepholeOptimizer.cpp
+        PCSectionHelpers.cpp
   PHIElimination.cpp
   PHIEliminationUtils.cpp
   PostRAHazardRecognizer.cpp

@@ -1,0 +1,10 @@
+//
+// Created by deniz on 8/25/26.
+//
+
+#ifndef LLVM_BPFIVREGISTERMAPPINGPASS_H
+#define LLVM_BPFIVREGISTERMAPPINGPASS_H
+
+class BPFIVRegisterMappingPass {};
+
+#endif // LLVM_BPFIVREGISTERMAPPINGPASS_H

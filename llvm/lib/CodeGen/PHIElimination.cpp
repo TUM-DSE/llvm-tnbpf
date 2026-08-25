@@ -13,7 +13,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/PHIElimination.h"
+#include "../../include/llvm/CodeGen/PCSectionHelpers.h"
 #include "PHIEliminationUtils.h"
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
@@ -43,6 +45,7 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -360,6 +363,24 @@ static bool allPhiOperandsUndefined(const MachineInstr &MPhi,
   }
   return true;
 }
+
+//TODO: Maybe move the helpers out of the BPF backend and use the code commonly?
+static MDTuple *getPCSectionByNameLocal(MDNode *all_md, std::string &name) {
+  //TODO: may have many arguments after each operand
+  for (unsigned int i=0;i<all_md->getNumOperands();i += 2) {
+    auto &label = all_md->getOperand(i);
+    MDString *md_string = dyn_cast<MDString>(label.get());
+    if (md_string->getString().compare(name) == 0) {
+      //no additional logic needed
+      MDTuple *entry = dyn_cast<MDTuple>(all_md->getOperand(i + 1).get());
+      return entry;
+    }
+  }
+  return nullptr;
+}
+
+
+
 /// LowerPHINode - Lower the PHI node at the top of the specified block.
 void PHIEliminationImpl::LowerPHINode(MachineBasicBlock &MBB,
                                       MachineBasicBlock::iterator LastPHIIt,
@@ -429,9 +450,12 @@ void PHIEliminationImpl::LowerPHINode(MachineBasicBlock &MBB,
     if (pc_sections) {
       LLVM_DEBUG(dbgs() << "bpf: found PHI node with PCSections\n");
       auto bpf_tag_name = std::string("_BPF_internal_phi_linkage");
+      auto bpf_function_pcsection_name = std::string("_iv_db");
+
       auto module = MF.getFunction().begin()->getModule();
       const auto module_name = module->getModuleIdentifier();
       bpf_tag_name.insert(0, module_name);
+      bpf_function_pcsection_name.insert(0, module_name);
       LLVM_DEBUG(dbgs() << "bpf: PCSections: ");
       LLVM_DEBUG(pc_sections->printTree(dbgs()));
       LLVM_DEBUG(dbgs() << "\n");
@@ -446,11 +470,41 @@ void PHIEliminationImpl::LowerPHINode(MachineBasicBlock &MBB,
         if (md_string->getString().compare(bpf_tag_name) == 0) {
           LLVM_DEBUG(dbgs() << "bpf: found PHI node with IV tag\n");
           MDTuple *tag_entry = dyn_cast<MDTuple>(pc_sections->getOperand(i + 1).get());
-          auto loop_id_of_entry = dyn_cast<ConstantAsMetadata>(tag_entry->getOperand(0).get());
+          LLVM_DEBUG(dbgs() << "PHI PCSection:\n");
+          LLVM_DEBUG(tag_entry->printTree(dbgs()));
+          LLVM_DEBUG(dbgs() << "\n");
+          llvm::LLVMContext &ctx = MF.getFunction().getContext();
           llvm::MDBuilder mb(module->getContext());
 
-          // TODO: Tag the terminator of the PHI's basic block (almost certainly a conditional branch) with the incoming register number and loop id.
-          // We will use it as a live-in register that contains the IV. It will be converted to the physical register in the pre-emit helper pass.
+          // Just tag the function with a table:
+          // Loop ID, IV Register number
+          // TODO: perhaps integrate this into the loop class PCSection somehow?
+          // As in, search for the loop class PCSection header and modify it in place
+
+          //almost certainly a virtual register ID
+          unsigned reg_id = IncomingReg.id();
+          auto *mdnode = initOrGetPCSectionArrayFunction(ctx, &MF.getFunction(), bpf_function_pcsection_name);
+
+          uint64_t section_count =  dyn_cast<ConstantInt>(
+              dyn_cast<ConstantAsMetadata>(
+                tag_entry
+                  ->getOperand(0).get()
+                  )
+                  ->getValue()
+                  )
+              ->getValue()
+              .getLimitedValue(UINT64_MAX);
+
+          for (uint64_t section_no = 0; section_no < section_count; section_no++) {
+            auto old_loop_id = dyn_cast<ConstantAsMetadata>(tag_entry->getOperand(section_no + 1).get());
+
+            mdnode = appendToPCSectionArray(ctx, bpf_function_pcsection_name, mdnode, {
+                old_loop_id->getValue(),
+                embedU32(ctx, reg_id)
+            });
+          }
+
+          MF.getFunction().setMetadata("pcsections", mdnode);
         }
       }
     }

@@ -3,12 +3,12 @@
 //
 
 #include "SCEVCanonicalPrintVisitor.h"
+#include "llvm/CodeGen/PCSectionHelpers.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Support/InterleavedRange.h"
-#include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
-#include "BPFPCSectionHelpers.h"
+#include "llvm/Support/InterleavedRange.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
 
 #define DEBUG_TYPE "llvm_bpf_scev_printer"
 

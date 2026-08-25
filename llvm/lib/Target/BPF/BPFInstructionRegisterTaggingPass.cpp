@@ -4,12 +4,16 @@
 
 #include "BPFInstructionRegisterTaggingPass.h"
 #define DEBUG_TYPE "bpf-instruction-register-tagging"
+#include "../../../include/llvm/CodeGen/PCSectionHelpers.h"
 #include "BPF.h"
+
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
+
+
 using namespace llvm;
 
 namespace {
@@ -20,6 +24,8 @@ namespace {
   public:
     bool runOnMachineFunction(MachineFunction &MF) override {
       LLVM_DEBUG(dbgs() << "begin BPF instruction register tagging pass\n");
+
+
       auto &LC = MF.getFunction().getContext();
       auto module = MF.getFunction().begin()->getModule();
       MachineRegisterInfo reg_info(&MF);
@@ -28,8 +34,10 @@ namespace {
       const auto module_name = module->getModuleIdentifier();
       sym_db_name.insert(0, module_name);
 
+
       MDBuilder MB(LC);
       for (auto &BB : MF) {
+
         for (auto &I : BB) {
           auto pc_sections = I.getPCSections();
           if (pc_sections) {
@@ -51,7 +59,7 @@ namespace {
                   for (auto op : I.all_defs()) {
                     if (op.isDef()) {
                       symdb_entry->replaceOperandWith(1, ConstantAsMetadata::get(
-                        llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(LC), llvm::APInt(64, op.getReg().id()))
+                        llvm::Constant::getIntegerValue(llvm::Type::getInt32Ty(LC), llvm::APInt(32, op.getReg().id()))
                       ));
 
                       break;
@@ -61,7 +69,6 @@ namespace {
 
                 }
                 }
-
             }
             for (int i=0;i<pc_sections->getNumOperands();i+=2) {
               auto &name = pc_sections->getOperand(i);

@@ -2,7 +2,7 @@
 // Created by deniz on 7/13/26.
 //
 
-#include "BPFPCSectionHelpers.h"
+#include "../../include/llvm/CodeGen/PCSectionHelpers.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/MDBuilder.h"

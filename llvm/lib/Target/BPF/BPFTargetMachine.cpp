@@ -60,6 +60,7 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeBPFTarget() {
   initializeBPFMIPreEmitCheckingPass(PR);
   initializeBPFSimplePass(PR);
   initializeBPFLoopTaggingPass(PR);
+  initializeBPFIVRegisterMappingPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
@@ -110,6 +111,9 @@ public:
   bool addRegBankSelect() override;
   bool addGlobalInstructionSelect() override;
   void addPreEmitPass2() override;
+
+  bool addPreRewrite() override;
+
 };
 }
 
@@ -200,6 +204,11 @@ void BPFPassConfig::addPreEmitPass() {
       addPass(createBPFMIPreEmitPeepholePass());
 
 
+}
+
+bool BPFPassConfig::addPreRewrite() {
+  addPass(createBPFIVRegisterMappingPass());
+  return false;
 }
 
 bool BPFPassConfig::addIRTranslator() {

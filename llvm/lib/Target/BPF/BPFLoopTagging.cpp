@@ -16,7 +16,7 @@
 
 #include <atomic>
 
-#include "BPFPCSectionHelpers.h"
+#include "../../../include/llvm/CodeGen/PCSectionHelpers.h"
 
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #define DEBUG_TYPE "bpf-loop-tagging"
@@ -98,7 +98,7 @@ llvm::Constant *pcSectionGetInstructionID(llvm::Instruction *instr) {
         {loop_name, {
           llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, inst_tag_id)),
           //Register ID goes here
-          llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, -1)),
+          llvm::Constant::getIntegerValue(llvm::Type::getInt32Ty(context), llvm::APInt(32, 0)),
         }}
   });
   if (old_mdnode) {
