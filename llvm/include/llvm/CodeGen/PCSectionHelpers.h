@@ -21,5 +21,6 @@ Constant *embedU1(LLVMContext &context, bool val);
 MDNode *appendToPCSectionArray(LLVMContext &context, std::string name, MDNode *old_md, SmallVector<Constant *> entries);
 MDNode *initOrGetPCSectionArrayFunction(LLVMContext &ctx, Function *fun, std::string name);
 MDNode *initOrGetPCSectionArrayInstruction(LLVMContext &ctx, Instruction *instr, std::string name);
+void setPCSectionByName(MDNode *all_md, std::string &name, MDTuple *new_val);
 
 #endif // LLVM_BPFPCSECTIONHELPERS_H

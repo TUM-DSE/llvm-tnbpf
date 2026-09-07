@@ -27,17 +27,6 @@ namespace {
 std::atomic<unsigned long long> loop_id = 0;
 std::atomic<unsigned long long> lookup_table_id = 0;
 std::atomic<unsigned long long> sym_ref_instruction_id = 0;
-//TODO: Move these conditions somewhere more accessible
-
-enum PCSLoopInfoType {
-    loop_cond_branch,
-    loop_cond_before,
-    loop_cond_instr,
-    loop_body_begin,
-};
-
-
-
 
 class SymbolicBoundTranslationTableEntry {
 private:
@@ -93,16 +82,36 @@ llvm::Constant *pcSectionGetInstructionID(llvm::Instruction *instr) {
   }
 
   uint64_t inst_tag_id = sym_ref_instruction_id.fetch_add(1);
-
   llvm::MDNode *node = mb.createPCSections({
         {loop_name, {
           llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, inst_tag_id)),
           //Register ID goes here
           llvm::Constant::getIntegerValue(llvm::Type::getInt32Ty(context), llvm::APInt(32, 0)),
+          //Instruction type goes here
+          llvm::Constant::getIntegerValue(llvm::Type::getInt32Ty(context), llvm::APInt(32, instr->getOpcode()))
         }}
   });
+
+
+  LLVM_DEBUG(
+    dbgs() << "Instruction tagging: new MDNode: \n";
+    node->printTree(dbgs());
+    dbgs() << "\n on instr: ";
+    instr->print(dbgs());
+    dbgs() << "\n";
+  );
   if (old_mdnode) {
+      LLVM_DEBUG(
+      dbgs() << "Instruction tagging: old MDNode: \n";
+      old_mdnode->printTree(dbgs());
+      dbgs() << "\n";
+    );
     node = llvm::MDNode::concatenate(old_mdnode, node);
+      LLVM_DEBUG(
+      dbgs() << "Instruction tagging: total MDNode: \n";
+      node->printTree(dbgs());
+      dbgs() << "\n";
+    );
   }
   instr->setMetadata("pcsections", node);
   return llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, inst_tag_id));
@@ -270,6 +279,8 @@ public:
 
   std::optional<SymbolicBoundTranslationTable *> translation_table_measure = {};
   std::optional<LoopVerificationProof *> loop_verification_proof = {};
+  std::optional<Constant *> cmp_id_tag = {};
+  std::optional<Constant *> br_id_tag = {};
   LoopTemplate() {
     this->loop_number = loop_id.fetch_add(1);
   }
@@ -305,6 +316,8 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
     embedU64(context, templ.stride.value_or(0)),
     embedU64(context, templ.exact_exit_count.value_or(0)),
     embedU64(context, templ.constant_max_exit_count.value_or(0)),
+    templ.br_id_tag.value_or(embedU64(context, 0)),
+    templ.cmp_id_tag.value_or(embedU64(context, 0)),
     embedU16(context, templ.comp_type),
     embedU1(context, templ.loopIsAscending.value_or(false)),
     embedU1(context, templ.loopTerminates.value_or(false)),
@@ -316,7 +329,9 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
     embedU1(context, templ.exact_exit_count.has_value()),
     embedU1(context, templ.constant_max_exit_count.has_value()),
     embedU1(context, templ.translation_table_measure.has_value()),
-    embedU1(context, templ.loop_verification_proof.has_value())
+    embedU1(context, templ.loop_verification_proof.has_value()),
+    embedU1(context, templ.br_id_tag.has_value()),
+    embedU1(context, templ.cmp_id_tag.has_value())
   };
   if (templ.loop_verification_proof.has_value()) {
     entries.append(templ.loop_verification_proof.value()->emitTable(context));
@@ -422,6 +437,14 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
         if (ConstantInt *step_int = dyn_cast<ConstantInt>(step)) {
           //TODO: what if we overflow / underflow?
           loop_meta.stride = step_int->getSExtValue();
+        }
+
+        if (auto *loop_guard = L->getLoopGuardBranch()) {
+          loop_meta.br_id_tag = pcSectionGetInstructionID(loop_guard);
+        }
+
+        if (auto *cond_compare = L->getLatchCmpInst()) {
+          loop_meta.cmp_id_tag = pcSectionGetInstructionID(cond_compare);
         }
       //TODO: maybe just take the CmpInst predicate into our struct instead of reinventing the wheel?
         switch (unpacked_lb.getCanonicalPredicate()) {

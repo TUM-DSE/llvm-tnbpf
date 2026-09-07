@@ -4,18 +4,53 @@
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
 
+    //PART A
+    /*
+
     for (int i=0;i<5000;i++) {
       bpf_printk("ascending loop <\n");
     }
+
     for (int i=0;i<=5000;i++) {
       bpf_printk("ascending loop <=\n");
     }
+
+
+
+
     for (int i=5000;i>0;i--) {
       bpf_printk("descending loop >\n");
     }
+
+
+
     for (int i=5000;i>=0;i--) {
       bpf_printk("descending loop >=\n");
     }
+
+
+  //PART B
+  */
+  unsigned int *unk = (unsigned int *)ctx;
+  unsigned int a;
+  a = unk[0];
+  /*
+  int n = 10;
+  if (a) {
+    bpf_printk("branch side effect\n");
+    n = 20;
+  }
+
+  for (int i=a;i<n;i++) {
+    bpf_printk("phi loop !=\n");
+  }
+  */
+
+  for (int i=0;i<a;i++) {
+    bpf_printk("variable upper bound loop <\n");
+  }
+
+
   /*
 
     for (int i=0;i<5000;i+=3) {
@@ -70,18 +105,9 @@ int hello_world(void *ctx) {
     }
     */
 
-    unsigned int *unk = (unsigned int *)ctx;
-    unsigned int a;
-    a = unk[0];
 
-    int n = 10;
-    if (a) {
-      bpf_printk("branch side effect\n");
-      n = 20;
-    }
-    for (int i=a;i<n;i++) {
-      bpf_printk("phi loop !=\n");
-    }
+
+
    /*
     for (int i=b;i<500;i++) {
       bpf_printk("other instruction bound loop\n");
