@@ -85,8 +85,6 @@ llvm::Constant *pcSectionGetInstructionID(llvm::Instruction *instr) {
   llvm::MDNode *node = mb.createPCSections({
         {loop_name, {
           llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, inst_tag_id)),
-          //Register ID goes here
-          llvm::Constant::getIntegerValue(llvm::Type::getInt32Ty(context), llvm::APInt(32, 0)),
           //Instruction type goes here
           llvm::Constant::getIntegerValue(llvm::Type::getInt32Ty(context), llvm::APInt(32, instr->getOpcode()))
         }}

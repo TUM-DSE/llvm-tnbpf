@@ -2,8 +2,8 @@
 // Created by deniz on 7/13/26.
 //
 
-#include "BPFInstructionRegisterTaggingPass.h"
-#define DEBUG_TYPE "bpf-instruction-register-tagging"
+#include "BPFPCSectionFixupPass.h"
+#define DEBUG_TYPE "bpf-pcsection-fixup"
 #include "../../../include/llvm/CodeGen/PCSectionHelpers.h"
 #include "BPF.h"
 
@@ -18,13 +18,13 @@
 using namespace llvm;
 
 namespace {
-  struct BPFInstructionRegisterTagging : public MachineFunctionPass {
+  struct BPFPCSectionFixup : public MachineFunctionPass {
     static char ID;
-    BPFInstructionRegisterTagging() : MachineFunctionPass(ID) {};
+    BPFPCSectionFixup() : MachineFunctionPass(ID) {};
 
   public:
     bool runOnMachineFunction(MachineFunction &MF) override {
-      LLVM_DEBUG(dbgs() << "begin BPF instruction register tagging pass\n");
+      LLVM_DEBUG(dbgs() << "begin BPF pcsection fixup pass\n");
 
 
       auto &LC = MF.getFunction().getContext();
@@ -50,7 +50,7 @@ namespace {
                 MDTuple *symdb_entry = dyn_cast<MDTuple>(pc_sections->getOperand(i + 1).get());
 
                 LLVM_DEBUG(
-                  dbgs() << "Instruction register tagging: old MDNode: \n Instr: ";
+                  dbgs() << "PCSection fixup: old MDNode: \n Instr: ";
                   I.print(dbgs());
                   dbgs() << "\n Entry: ";
                   symdb_entry->printTree(dbgs());
@@ -60,13 +60,13 @@ namespace {
 
                 );
 
-                uint64_t opcode_llvm = dyn_cast<ConstantInt>(dyn_cast<ConstantAsMetadata>(symdb_entry->getOperand(2).get())->getValue())->getLimitedValue(UINT32_MAX);
+                uint64_t opcode_llvm = dyn_cast<ConstantInt>(dyn_cast<ConstantAsMetadata>(symdb_entry->getOperand(1).get())->getValue())->getLimitedValue(UINT32_MAX);
                 LLVM_DEBUG(
                   dbgs() << "Instruction opcode: " << opcode_llvm << " plain name: " << Instruction::getOpcodeName(opcode_llvm) << "\n"
                   );
                 bool remove_metadata = false;
 
-                symdb_entry = MDTuple::get(LC, {symdb_entry->getOperand(0), symdb_entry->getOperand(1)});
+                symdb_entry = MDTuple::get(LC, {symdb_entry->getOperand(0)});
 
 
                 //TODO: this is a bodge, what if PCSections fully duplicates the instruction rather than emitting helpers?
@@ -103,7 +103,7 @@ namespace {
                   } else {
                     I.setPCSections(MF, MDTuple::get(LC, new_pcsections));
                     LLVM_DEBUG(
-                        dbgs() << "Instruction register tagging: new MDNode: \n";
+                        dbgs() << "PCSection Fixup: new MDNode: \n";
                         I.getPCSections()->printTree(dbgs());
                         dbgs() << "\n";
                       );
@@ -132,64 +132,23 @@ namespace {
                 I.setPCSections(MF, MDTuple::get(LC, new_pcsections));
 
                 LLVM_DEBUG(
-                      dbgs() << "Instruction register tagging: new MDNode: \n";
+                      dbgs() << "PCSection fixup: new MDNode: \n";
                       I.getPCSections()->printTree(dbgs());
                       dbgs() << "\n";
                     );
-
-
-
-                auto old_instr_register = dyn_cast<ConstantAsMetadata>(symdb_entry->getOperand(1).get());
-                auto integer_const = dyn_cast<ConstantInt>(old_instr_register->getValue());
-                if (I.getNumDefs() == 1) {
-                  //TODO: probably a terrible way to do this but good enough for now
-                  for (auto op : I.all_defs()) {
-                    if (op.isDef()) {
-                      //Better replacement code, less horrible duplication stuff:
-                      SmallVector<Metadata *, 10> pcsections_register = {};
-
-                      for (int j=0;j<pc_sections->getNumOperands();j+=2) {
-                        pcsections_register.push_back(pc_sections->getOperand(j).get());
-                        if (i == j) {
-                          pcsections_register.push_back(symdb_entry);
-                        } else {
-                          pcsections_register.push_back(pc_sections->getOperand(j + 1).get());
-                        }
-
-                      }
-
-                      I.setPCSections(MF, MDTuple::get(LC, pcsections_register));
-
-                      symdb_entry->replaceOperandWith(1, ConstantAsMetadata::get(
-                        llvm::Constant::getIntegerValue(llvm::Type::getInt32Ty(LC), llvm::APInt(32, op.getReg().id()))
-                      ));
-
-
-                      LLVM_DEBUG(
-                        dbgs() << "Instruction register tagging: new MDNode: \n";
-                        symdb_entry->printTree(dbgs());
-                        dbgs() << "\n";
-                      );
-
-                      break;
-                    }
-
-                  }
-
-                }
                 }
             }
           }
           post_instr:
         }
       }
-      LLVM_DEBUG(dbgs() << "end BPF instruction register tagging pass\n");
+      LLVM_DEBUG(dbgs() << "end BPF pcsection fixup pass\n");
       return false;
     }
 
   };
 };
 
-INITIALIZE_PASS(BPFInstructionRegisterTagging, DEBUG_TYPE, "BPF Instruction Register Tagging", false, false)
-char BPFInstructionRegisterTagging::ID = 0;
-FunctionPass *llvm::createBPFInstructionRegisterTaggingPass() { return new BPFInstructionRegisterTagging(); }
+INITIALIZE_PASS(BPFPCSectionFixup, DEBUG_TYPE, "BPF PCSection Fixup", false, false)
+char BPFPCSectionFixup::ID = 0;
+FunctionPass *llvm::createBPFPCSectionFixupPass() { return new BPFPCSectionFixup(); }

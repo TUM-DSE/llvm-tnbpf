@@ -30,7 +30,7 @@ add_llvm_target(BPFCodeGen
         BPFSimplePass.cpp
         BPFFunctionTagging.cpp
         BPFTypeEmbedding.cpp
-        BPFInstructionRegisterTaggingPass.cpp
+        BPFPCSectionFixupPass.cpp
         BPFIVRegisterMappingPass.cpp
   BPFFrameLowering.cpp
   BPFInstrInfo.cpp

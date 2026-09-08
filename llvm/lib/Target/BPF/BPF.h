@@ -34,7 +34,7 @@ FunctionPass *createBPFMIPreEmitPeepholePass();
 FunctionPass *createBPFMIPreEmitCheckingPass();
 FunctionPass *createBPFSimplePass();
 FunctionPass *createBPFFunctionTaggingPass();
-FunctionPass *createBPFInstructionRegisterTaggingPass();
+FunctionPass *createBPFPCSectionFixupPass();
 FunctionPass *createBPFIVRegisterMappingPass();
 
 LoopPass *createBPFLoopTaggingPass();
@@ -52,7 +52,7 @@ void initializeBPFMIPreEmitPeepholePass(PassRegistry &);
 void initializeBPFMISimplifyPatchablePass(PassRegistry &);
 void initializeBPFSimplePass(PassRegistry &);
 void initializeBPFLoopTaggingPass(PassRegistry &);
-void initializeBPFFunctionTaggingPass(PassRegistry &);
+void initializeBPFPCSectionFixupPass(PassRegistry &);
 void initializeBPFInstructionRegisterTaggingPass(PassRegistry &);
 void initializeBPFIVRegisterMappingPass(PassRegistry &);
 
