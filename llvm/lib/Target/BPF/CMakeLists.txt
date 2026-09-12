@@ -32,6 +32,13 @@ add_llvm_target(BPFCodeGen
         BPFTypeEmbedding.cpp
         BPFPCSectionFixupPass.cpp
         BPFIVRegisterMappingPass.cpp
+        BPFPCSectionHelpers.cpp
+        BPFLoopTemplate.cpp
+        SBT/SBTConstantEntry.cpp
+        SBT/SBTFunctionArgEntry.cpp
+        SBT/SBTInstructionEntry.cpp
+        SBT/SymbolicBoundTranslationTable.cpp
+        SBT/SymbolicBoundTranslationTableEntry.cpp
   BPFFrameLowering.cpp
   BPFInstrInfo.cpp
   BPFIRPeephole.cpp

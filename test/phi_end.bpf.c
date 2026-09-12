@@ -6,14 +6,17 @@
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
-  int *unk = (int *)(ctx);
-  for (int i=0;i<20;) {
-    bpf_printk("side effect %d\n", i);
-    if (unk[i] & 1) {
-      i++;
-    } else {
-      i += 2;
-    }
+  unsigned int *unk = (unsigned int *)ctx;
+  unsigned int a;
+  a = unk[0];
+  int n = 10;
+  if (a) {
+    bpf_printk("branch side effect\n");
+    n = 20;
+  }
+
+  for (int i=a;i<n;i++) {
+    bpf_printk("phi loop !=\n");
   }
   return 0;
 }

@@ -12,340 +12,21 @@
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
-#include "SCEVCanonicalPrintVisitor.h"
+#include "llvm/CodeGen/PCSectionHelpers.h"
 
-#include <atomic>
+#include "BPFPCSectionHelpers.h"
+#include "BPFLoopTemplate.h"
 
-#include "../../../include/llvm/CodeGen/PCSectionHelpers.h"
-
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #define DEBUG_TYPE "bpf-loop-tagging"
 
 using namespace llvm;
 
 namespace {
-std::atomic<unsigned long long> loop_id = 0;
-std::atomic<unsigned long long> lookup_table_id = 0;
-std::atomic<unsigned long long> sym_ref_instruction_id = 0;
-
-class SymbolicBoundTranslationTableEntry {
-private:
-  virtual llvm::Constant *emitToTable(llvm::LLVMContext &context, llvm::DataLayout &dl);
-  virtual uint64_t getEntryType();
-public:
-    enum EntryTypes {
-      Instruction,
-      Constant,
-      FunctionParameter
-    };
-
-  llvm::Constant *getTableEntry(llvm::LLVMContext &context, llvm::DataLayout &dl) {
-
-    return llvm::ConstantStruct::getAnon({
-      llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, getEntryType())),
-      emitToTable(context, dl)
-    }, true);
-  }
-  virtual ~SymbolicBoundTranslationTableEntry() {};
 
 
-};
-
-class SBTFunctionArgEntry : public SymbolicBoundTranslationTableEntry {
-  llvm::Argument *arg;
-private:
-  llvm::Constant *emitToTable(llvm::LLVMContext &context, llvm::DataLayout &dl) override {
-    return llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, arg->getArgNo()));
-  }
-  uint64_t getEntryType() override {
-  return EntryTypes::FunctionParameter;
-  }
-  public:
-  SBTFunctionArgEntry(llvm::Argument *arg) : arg(arg) {}
-
-  ~SBTFunctionArgEntry() override {}
-};
-
-llvm::Constant *pcSectionGetInstructionID(llvm::Instruction *instr) {
-  llvm::LLVMContext &context = instr->getContext();
-  llvm::MDBuilder mb(context);
-  auto loop_name = std::string("_sym_instr_db");
-  const auto module_name = instr->getModule()->getModuleIdentifier();
-  loop_name.insert(0, module_name);
-  auto old_mdnode = instr->getMetadata("pcsections");
-  if (old_mdnode) {
-    //TODO: redundant section search logic, move elsewhere and turn into a getPCSectionByName helper function somewhere?
-    if (auto symdb_entry = getPCSectionByName(old_mdnode, loop_name)) {
-      auto old_instr_tag_id = dyn_cast<ConstantAsMetadata>(symdb_entry->getOperand(0).get());
-      return old_instr_tag_id->getValue();
-    }
-  }
-
-  uint64_t inst_tag_id = sym_ref_instruction_id.fetch_add(1);
-  llvm::MDNode *node = mb.createPCSections({
-        {loop_name, {
-          llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, inst_tag_id)),
-          //Instruction type goes here
-          llvm::Constant::getIntegerValue(llvm::Type::getInt32Ty(context), llvm::APInt(32, instr->getOpcode()))
-        }}
-  });
-
-
-  LLVM_DEBUG(
-    dbgs() << "Instruction tagging: new MDNode: \n";
-    node->printTree(dbgs());
-    dbgs() << "\n on instr: ";
-    instr->print(dbgs());
-    dbgs() << "\n";
-  );
-  if (old_mdnode) {
-      LLVM_DEBUG(
-      dbgs() << "Instruction tagging: old MDNode: \n";
-      old_mdnode->printTree(dbgs());
-      dbgs() << "\n";
-    );
-    node = llvm::MDNode::concatenate(old_mdnode, node);
-      LLVM_DEBUG(
-      dbgs() << "Instruction tagging: total MDNode: \n";
-      node->printTree(dbgs());
-      dbgs() << "\n";
-    );
-  }
-  instr->setMetadata("pcsections", node);
-  return llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, inst_tag_id));
-}
-
-
-class SBTInstructionEntry : public SymbolicBoundTranslationTableEntry {
-
-llvm::Instruction *inst;
-private:
-  llvm::Constant *emitToTable(llvm::LLVMContext &context, llvm::DataLayout &dl) override {
-    return pcSectionGetInstructionID(inst);
-  }
-  uint64_t getEntryType() override {
-  return EntryTypes::Instruction;
-  }
-public:
-
-  SBTInstructionEntry(llvm::Instruction *inst) : inst(inst) {
-
-  }
-
-  ~SBTInstructionEntry() override {};
-};
-
-class SBTConstantEntry : public SymbolicBoundTranslationTableEntry {
-
-llvm::Constant *c;
-private:
-  llvm::Constant *emitToTable(llvm::LLVMContext &context, llvm::DataLayout &dl) override {
-    //TODO: if c is a global constant value, this just copies the whole entire global constant to c
-    return llvm::ConstantStruct::getAnon({
-      llvm::Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, dl.getTypeAllocSize(c->getType()))),
-      //TODO: no idea how to handle embedding non integer types
-      c
-    }, true);
-  }
-  uint64_t getEntryType() override {
-    return EntryTypes::Constant;
-  }
-public:
-  SBTConstantEntry(llvm::Constant *c) : c(c) {
-
-  }
-
-  ~SBTConstantEntry() override {};
-};
-class SymbolicBoundTranslationTable {
-
-    public:
-
-    std::vector<Value *> original_values;
-    SymbolicBoundTranslationTable(ScalarEvolution &SE, Loop *loop, PHINode *iv, const SCEV *start, const SCEV *end, const SCEV *stride, uint64_t l_id) : SE(SE) {
-        SCEVCanonicalPrintVisitor visitor(SE, loop, iv,  l_id);
-        visitor.measure(end, stride);
-        auto results = visitor.collectResults();
-        auto translation_map = results.first;
-        //debugging purposes
-        this->original_values = translation_map;
-        resultString = results.second;
-        //now, translate results to our symbolic table format
-
-        for (unsigned i = 0; i < translation_map.size();i++) {
-          auto val = translation_map[i];
-          if (auto func_arg = dyn_cast<Argument>(val)) {
-            dependencies.push_back(new SBTFunctionArgEntry(func_arg));
-          } else if (auto constant = dyn_cast<Constant>(val)) {
-            dependencies.push_back(new SBTConstantEntry(constant));
-          } else if (auto instr = dyn_cast<Instruction>(val)) {
-            dependencies.push_back(new SBTInstructionEntry(instr));
-          } else {
-            llvm_unreachable("Unhandled value type encountered in SCEV!");
-          }
-        }
-    }
-
-    void tagAndEmitTable(llvm::Function *function_to_tag, llvm::LLVMContext &context, llvm::MDBuilder &mb, uint64_t loop_number) {
-      auto loop_name = std::string("_loopdb_symbounds");
-      const auto module_name = function_to_tag->begin()->getModule()->getModuleIdentifier();
-      loop_name.insert(0, module_name);
-      auto *old_mdnode = initOrGetPCSectionArrayFunction(context, function_to_tag, loop_name);
-      LLVM_DEBUG(dbgs() << "Print mdnode data before: \n");
-      LLVM_DEBUG(old_mdnode->printTree(dbgs()));
-      LLVM_DEBUG(dbgs() << "\n");
-      llvm::SmallVector<llvm::Constant *> entries;
-      entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, loop_number)));
-      //first, embed the string itself
-      entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, this->getResultString().size())));
-      entries.push_back(ConstantDataArray::getString(context, getResultString(), false));
-      //now, we need to encode our table
-      entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, this->dependencies.size())));
-      auto dl = function_to_tag->begin()->getModule()->getDataLayout();
-      for (auto dep : dependencies) {
-        auto to_emit = dep->getTableEntry(context, dl);
-        // https://stackoverflow.com/a/14608251
-        // More specifically, https://stackoverflow.com/questions/14608250/how-can-i-find-the-size-of-a-type#comment125528828_14608251
-        //uint64_t const_size = function_to_tag->begin()->getModule()->getDataLayout().getTypeAllocSize(to_emit->getType());
-        //entries.push_back(Constant::getIntegerValue(llvm::Type::getInt64Ty(context), llvm::APInt(64, const_size)));
-        entries.push_back(to_emit);
-      }
-      function_to_tag->setMetadata("pcsections", appendToPCSectionArray(context, loop_name, old_mdnode, entries));
-      LLVM_DEBUG(dbgs() << "Print mdnode data after: \n");
-      LLVM_DEBUG(function_to_tag->getMetadata("pcsections")->printTree(dbgs()));
-      LLVM_DEBUG(dbgs() << "\n");
-    }
-
-    ~SymbolicBoundTranslationTable() {
-      LLVM_DEBUG(dbgs() << "translation table destructor called\n");
-        for (auto *dep : dependencies) {
-          delete dep;
-        }
-    }
-
-    std::string getResultString() {
-      return resultString;
-    }
-
-private:
-  ScalarEvolution &SE;
-  // TODO: I don't actually know if we need the * in here or if C++ sorts out ownership for us
-  std::vector<SymbolicBoundTranslationTableEntry *> dependencies;
-  std::string resultString;
-};
-
-class LoopVerificationProof {
-public:
-  LoopVerificationProof() {
-
-  }
-  SmallVector<llvm::Constant *> latches = {};
-  SmallVector<Constant *> emitTable(LLVMContext &context) {
-    SmallVector<Constant *> entries = {};
-    entries.push_back(embedU64(context, latches.size()));
-    entries.append(latches);
-    return entries;
-  }
-
-};
-
-class LoopTemplate {
-public:
-  uint64_t loop_number;
-  std::optional<int64_t> start = {};
-  std::optional<int64_t> finish = {};
-  std::optional<int64_t> stride = {};
-  enum ComparisonType {
-    //Bitmasking enabled comparison enum
-    //        < = >
-    FALSE,  //0 0 0
-    GT,     //0 0 1
-    EQ,     //0 1 0
-    GEQ,    //0 1 1
-    LT,     //1 0 0
-    NEQ,    //1 0 1
-    LEQ,    //1 1 0
-    TRUE,   //1 1 1
-    C_UNK,
-  };
-  ComparisonType comp_type = C_UNK;
-  std::optional<bool> loopIsAscending= {};
-  std::optional<bool> loopTerminates= {};
-  //TODO: populate these two as well
-  std::optional<uint64_t> exact_exit_count= {};
-  std::optional<uint64_t> constant_max_exit_count= {};
-
-  std::optional<SymbolicBoundTranslationTable *> translation_table_measure = {};
-  std::optional<LoopVerificationProof *> loop_verification_proof = {};
-  std::optional<Constant *> cmp_id_tag = {};
-  std::optional<Constant *> br_id_tag = {};
-  LoopTemplate() {
-    this->loop_number = loop_id.fetch_add(1);
-  }
-  ~LoopTemplate() {
-
-  }
-};
-
-static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder mb, LoopTemplate &templ, llvm::Function *func) {
-  auto loop_name = std::string("_loopdb_class");
-  //TODO: this is an extremely hacky way to get the module from the function and breaks if the function is currently empty
-  const auto module_name = func->begin()->getModule()->getModuleIdentifier();
-  loop_name.insert(0, module_name);
-  if (templ.translation_table_measure.has_value()) {
-    templ.translation_table_measure.value()->tagAndEmitTable(func, context, mb, templ.loop_number);
-  }
-  auto old_mdnode = initOrGetPCSectionArrayFunction(context, func, loop_name);
-
-  LLVM_DEBUG(dbgs() << "Print mdnode data before pc section loop: \n");
-  LLVM_DEBUG(old_mdnode->printTree(dbgs()));
-  LLVM_DEBUG(dbgs() << "\n");
-
-  //auto i64t = llvm::Type::getInt64Ty(context);
-  //auto i16t = llvm::Type::getInt16Ty(context);
-  //auto i1t = llvm::Type::getInt1Ty(context);
-  // TODO: This is an absolutely horrible way to specify the type
-  // Does LLVM have some sort of type annotation that auto-creates LLVM struct
-  // types from regular host struct decls?
-  SmallVector<Constant *> entries = {
-    embedU64(context, templ.loop_number),
-    embedU64(context, templ.start.value_or(0)),
-    embedU64(context, templ.finish.value_or(0)),
-    embedU64(context, templ.stride.value_or(0)),
-    embedU64(context, templ.exact_exit_count.value_or(0)),
-    embedU64(context, templ.constant_max_exit_count.value_or(0)),
-    templ.br_id_tag.value_or(embedU64(context, 0)),
-    templ.cmp_id_tag.value_or(embedU64(context, 0)),
-    embedU16(context, templ.comp_type),
-    embedU1(context, templ.loopIsAscending.value_or(false)),
-    embedU1(context, templ.loopTerminates.value_or(false)),
-    embedU1(context, templ.loopIsAscending.has_value()),
-    embedU1(context, templ.start.has_value()),
-    embedU1(context, templ.finish.has_value()),
-    embedU1(context, templ.stride.has_value()),
-    embedU1(context, templ.loopTerminates.has_value()),
-    embedU1(context, templ.exact_exit_count.has_value()),
-    embedU1(context, templ.constant_max_exit_count.has_value()),
-    embedU1(context, templ.translation_table_measure.has_value()),
-    embedU1(context, templ.loop_verification_proof.has_value()),
-    embedU1(context, templ.br_id_tag.has_value()),
-    embedU1(context, templ.cmp_id_tag.has_value())
-  };
-  if (templ.loop_verification_proof.has_value()) {
-    entries.append(templ.loop_verification_proof.value()->emitTable(context));
-  }
-
-
-  func->setMetadata("pcsections", appendToPCSectionArray(context, loop_name, old_mdnode, entries));
-  LLVM_DEBUG(dbgs() << "Print mdnode data after pcsection loop: \n");
-  LLVM_DEBUG(func->getMetadata("pcsections")->printTree(dbgs()));
-  LLVM_DEBUG(dbgs() << "\n");
-}
-
-  struct BPFLoopTagging : public LoopPass {
+  struct BPFLoopTagging : LoopPass {
     static char ID;
     BPFLoopTagging() : LoopPass(ID) {}
-  public:
     bool runOnLoop(Loop *L, LPPassManager &LPM) override {
       auto &context = L->getHeader()->getContext();
       LLVM_DEBUG(dbgs() << "begin bpf loop pass on loop:" << "\n");
@@ -354,16 +35,16 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
       auto &SE = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
       LLVM_DEBUG(dbgs() << "got analysis" << "\n");
 
-      LoopTemplate loop_meta;
+      BPFLoopTemplate loop_meta;
 
 
-      LoopVerificationProof proof;
+
       bool loop_verification_failed = false;
       {
         SmallVector<BasicBlock *> loop_latches = {};
         L->getLoopLatches(loop_latches);
         for (auto BB : loop_latches) {
-          proof.latches.push_back(pcSectionGetInstructionID(BB->getTerminator()));
+          loop_meta.latches.push_back(pcSectionGetInstructionID(BB->getTerminator()));
         }
       }
 
@@ -371,6 +52,24 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
       const SCEV *start_scev = nullptr;
       const SCEV *end_scev = nullptr;
       const SCEV *stride_scev = nullptr;
+
+      if (auto *loop_guard = L->getLoopGuardBranch()) {
+        loop_meta.br_id_tag = pcSectionGetInstructionID(loop_guard);
+      }
+
+      if (auto *cond_compare = L->getLatchCmpInst()) {
+        loop_meta.cmp_id_tag = pcSectionGetInstructionID(cond_compare);
+      }
+
+      auto iv_val = L->getInductionVariable(SE);
+      const SCEV *iv = nullptr;
+      if (iv_val) {
+        iv = SE.getSCEV(iv_val);
+        LLVM_DEBUG(iv->print(dbgs()));
+        LLVM_DEBUG(dbgs() << "\n");
+
+      }
+
       if (lb.has_value()) {
         auto unpacked_lb = lb.value();
 
@@ -400,14 +99,7 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
 
           break;
         }
-        auto iv_val = L->getInductionVariable(SE);
-        const SCEV *iv = nullptr;
-        if (iv_val) {
-          iv = SE.getSCEV(iv_val);
-          LLVM_DEBUG(iv->print(dbgs()));
-          LLVM_DEBUG(dbgs() << "\n");
 
-        }
 
         if (!L->isLoopInvariant(&end)) {
           loop_verification_failed = true;
@@ -437,118 +129,10 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
           loop_meta.stride = step_int->getSExtValue();
         }
 
-        if (auto *loop_guard = L->getLoopGuardBranch()) {
-          loop_meta.br_id_tag = pcSectionGetInstructionID(loop_guard);
-        }
 
-        if (auto *cond_compare = L->getLatchCmpInst()) {
-          loop_meta.cmp_id_tag = pcSectionGetInstructionID(cond_compare);
-        }
-      //TODO: maybe just take the CmpInst predicate into our struct instead of reinventing the wheel?
-        switch (unpacked_lb.getCanonicalPredicate()) {
-        case CmpInst::FCMP_FALSE:
-          loop_meta.comp_type = LoopTemplate::FALSE;
-          loop_meta.loopTerminates = true;
-          break;
-        case CmpInst::FCMP_OEQ:
-          loop_meta.comp_type = LoopTemplate::EQ;
-          break;
-        case CmpInst::FCMP_OGT:
-          loop_meta.comp_type = LoopTemplate::GT;
-          break;
-        case CmpInst::FCMP_OGE:
-          loop_meta.comp_type = LoopTemplate::GEQ;
-          break;
-        case CmpInst::FCMP_OLT:
-          loop_meta.comp_type = LoopTemplate::LT;
-          break;
-        case CmpInst::FCMP_OLE:
-          loop_meta.comp_type = LoopTemplate::LEQ;
-          break;
-        case CmpInst::FCMP_ONE:
-          loop_meta.comp_type = LoopTemplate::NEQ;
-          break;
-        case CmpInst::FCMP_ORD:
-          break;
-        case CmpInst::FCMP_UNO:
-          break;
-        case CmpInst::FCMP_UEQ:
-          loop_meta.comp_type = LoopTemplate::EQ;
-          break;
-        case CmpInst::FCMP_UGT:
-          loop_meta.comp_type = LoopTemplate::GT;
-          break;
-        case CmpInst::FCMP_UGE:
-          loop_meta.comp_type = LoopTemplate::GEQ;
-          break;
-        case CmpInst::FCMP_ULT:
-          loop_meta.comp_type = LoopTemplate::LT;
-          break;
-        case CmpInst::FCMP_ULE:
-          loop_meta.comp_type = LoopTemplate::LEQ;
-          break;
-        case CmpInst::FCMP_UNE:
-          loop_meta.comp_type = LoopTemplate::NEQ;
-          break;
-        case CmpInst::FCMP_TRUE:
-          loop_meta.comp_type = LoopTemplate::TRUE;
-          loop_meta.loopTerminates = false;
-          break;
-        case CmpInst::BAD_FCMP_PREDICATE:
-          break;
-        case CmpInst::ICMP_EQ:
-          loop_meta.comp_type = LoopTemplate::EQ;
-          break;
-        case CmpInst::ICMP_NE:
-          loop_meta.comp_type = LoopTemplate::NEQ;
-          break;
-        case CmpInst::ICMP_UGT:
-          loop_meta.comp_type = LoopTemplate::GT;
-          break;
-        case CmpInst::ICMP_UGE:
-          loop_meta.comp_type = LoopTemplate::GEQ;
-          break;
-        case CmpInst::ICMP_ULT:
-          loop_meta.comp_type = LoopTemplate::LT;
-          break;
-        case CmpInst::ICMP_ULE:
-          loop_meta.comp_type = LoopTemplate::LEQ;
-          break;
-        case CmpInst::ICMP_SGT:
-          loop_meta.comp_type = LoopTemplate::GT;
-          break;
-        case CmpInst::ICMP_SGE:
-          loop_meta.comp_type = LoopTemplate::GEQ;
-          break;
-        case CmpInst::ICMP_SLT:
-          loop_meta.comp_type = LoopTemplate::LT;
-          break;
-        case CmpInst::ICMP_SLE:
-          loop_meta.comp_type = LoopTemplate::LEQ;
-
-          break;
-        case CmpInst::BAD_ICMP_PREDICATE:
-          break;
-        }
-//I haven't got the slightest clue why these functions in particular give results but I am not complaining
-      auto exact_end = SE.getBackedgeTakenCount(L, ScalarEvolution::Exact);
-      LLVM_DEBUG(dbgs() << "exact exit count: ");
-      LLVM_DEBUG(exact_end->print(dbgs()));
-      LLVM_DEBUG(dbgs() << "\n");
-      auto const_max_end = SE.getBackedgeTakenCount(L, ScalarEvolution::ConstantMaximum);
-      LLVM_DEBUG(dbgs() << "constant max exit count: ");
-      LLVM_DEBUG(const_max_end->print(dbgs()));
-      LLVM_DEBUG(dbgs() << "\n");
-      auto sym_max_end = SE.getSymbolicMaxBackedgeTakenCount(L);
-      LLVM_DEBUG(dbgs() << "symbolic max exit count: ");
-      LLVM_DEBUG(sym_max_end->print(dbgs()));
-      for (auto operand : sym_max_end->operands()) {
-        LLVM_DEBUG(dbgs() << "operand: ");
-        LLVM_DEBUG(operand.print(dbgs()));
-        LLVM_DEBUG(dbgs() << "\n");
-      }
+        loop_meta.importLoopComparison(unpacked_lb.getCanonicalPredicate());
       if (iv_val) {
-        SymbolicBoundTranslationTable *sym_max_measure_standardized = new SymbolicBoundTranslationTable(SE, L, iv_val, start_scev, end_scev, stride_scev, loop_meta.loop_number);
+        SymbolicBoundTranslationTable *sym_max_measure_standardized = new SymbolicBoundTranslationTable(SE, L, iv_val, end_scev, stride_scev, loop_meta.loop_number);
         loop_meta.translation_table_measure = sym_max_measure_standardized;
         LLVM_DEBUG(dbgs() << "symbolic max measure SCEV result string: " << sym_max_measure_standardized->getResultString() << "\n");
         LLVM_DEBUG(dbgs() << "results vector:\n");
@@ -558,23 +142,14 @@ static void pcSectionLoopClassifyTag(llvm::LLVMContext &context, llvm::MDBuilder
           LLVM_DEBUG(dbgs() << "\n");
         }
       }
-
-
-
-
-
-
       LLVM_DEBUG(dbgs() << "end bpf loop pass on loop:" << "\n");
-      if (!loop_verification_failed) {
-        loop_meta.loop_verification_proof = &proof;
-      }
-      pcSectionLoopClassifyTag(L->getHeader()->getContext(), llvm::MDBuilder(L->getHeader()->getContext()), loop_meta, L->getHeader()->getParent());
-
-
 
       } else {
         LLVM_DEBUG(dbgs() << "failed to get loop bounds" << "\n");
+        //Time to add some handler code here
+        //We can do much less in this case
       }
+      loop_meta.pcSectionLoopClassifyTag(L->getHeader()->getParent());
       LLVM_DEBUG(dbgs() << "print entire loop:" << "\n");
       printLoop(*L, dbgs());
       if (isFinite(L)) {

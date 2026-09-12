@@ -2,8 +2,8 @@
 // Created by deniz on 7/13/26.
 //
 
-#ifndef LLVM_BPFPCSECTIONHELPERS_H
-#define LLVM_BPFPCSECTIONHELPERS_H
+#ifndef LLVM_PCSECTIONHELPERS_H
+#define LLVM_PCSECTIONHELPERS_H
 #include <string>
 
 #include "llvm/IR/Constants.h"
@@ -23,4 +23,4 @@ MDNode *initOrGetPCSectionArrayFunction(LLVMContext &ctx, Function *fun, std::st
 MDNode *initOrGetPCSectionArrayInstruction(LLVMContext &ctx, Instruction *instr, std::string name);
 void setPCSectionByName(MDNode *all_md, std::string &name, MDTuple *new_val);
 
-#endif // LLVM_BPFPCSECTIONHELPERS_H
+#endif // LLVM_PCSECTIONHELPERS_H

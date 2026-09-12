@@ -6,14 +6,8 @@
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
-  int *unk = (int *)(ctx);
-  for (int i=0;i<20;) {
-    bpf_printk("side effect %d\n", i);
-    if (unk[i] & 1) {
-      i++;
-    } else {
-      i += 2;
-    }
+  for (unsigned int i=0;i<5000;i++) {
+    bpf_printk("ascending loop, terminates %d\n", i);
   }
   return 0;
 }

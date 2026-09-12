@@ -55,6 +55,7 @@ void initializeBPFLoopTaggingPass(PassRegistry &);
 void initializeBPFPCSectionFixupPass(PassRegistry &);
 void initializeBPFInstructionRegisterTaggingPass(PassRegistry &);
 void initializeBPFIVRegisterMappingPass(PassRegistry &);
+void initializeBPFFunctionTaggingPass(PassRegistry &);
 
 class BPFAbstractMemberAccessPass
     : public PassInfoMixin<BPFAbstractMemberAccessPass> {

@@ -6,14 +6,8 @@
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
-  int *unk = (int *)(ctx);
-  for (int i=0;i<20;) {
-    bpf_printk("side effect %d\n", i);
-    if (unk[i] & 1) {
-      i++;
-    } else {
-      i += 2;
-    }
+  for (int i=50;i>10;i++) {
+    bpf_printk("Will overflow and UB, assume it doesn't terminate since the verifier will error anyway\n");
   }
   return 0;
 }
