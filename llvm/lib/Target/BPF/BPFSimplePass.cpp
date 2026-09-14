@@ -25,7 +25,7 @@ namespace {
 
     bool runOnMachineFunction(MachineFunction &M) override {
       //LLVM_DEBUG(dbgs() << "begin bpf simple pass debug" << "\n");
-      M.print(dbgs());
+      //M.print(dbgs());
       auto &LC = M.getFunction().getContext();
       MDBuilder MB(LC);
       for (auto &x : M) {

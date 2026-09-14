@@ -7,7 +7,7 @@
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
   for (unsigned int i=50;i>10;i++) {
-    bpf_printk("Will terminate eventually, since the addition will overflow and get us to 0\n");
+    bpf_printk("Will terminate eventually, since i++ will overflow and get us to 0 %d\n", i);
   }
   return 0;
 }

@@ -56,6 +56,7 @@
               just
               linuxHeaders
               libbpf
+              go
             ];
 
             NIX_LDFLAGS = "-rpath ${pkgs.zlib}/lib";

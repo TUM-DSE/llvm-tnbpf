@@ -7,7 +7,7 @@
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
   for (unsigned int i=5;i>0;i-=2) {
-    bpf_printk("5 not even, this will never be exactly zero\n");
+    bpf_printk("5 not even, this will never be exactly zero %d\n", i);
   }
   return 0;
 }

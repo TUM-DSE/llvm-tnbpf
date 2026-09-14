@@ -7,10 +7,10 @@
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
     for (unsigned int i=0;i<5000;i+=3) {
-      bpf_printk("ascending loop < stride 3\n");
+      bpf_printk("ascending loop < stride 3 %d\n", i);
     }
     for (unsigned int i=0;i<5000;i+=5) {
-      bpf_printk("ascending loop < stride 5\n");
+      bpf_printk("ascending loop < stride 5 %d\n", i);
     }
     return 0;
 }
