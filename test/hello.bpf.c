@@ -6,10 +6,8 @@
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int hello_world(void *ctx) {
-  int *array = (int *)(ctx);
-  int *array_end = &array[50];
-  for (;array < array_end; array = &array[1]) {
-    bpf_printk("array loop %d\n", *array);
+  for (int i=0;i<500;i++) {
+    bpf_printk("something %d\n", i);
   }
 }
 

@@ -178,7 +178,7 @@ switch (S->getSCEVType()) {
       OpStr = " smin ";
       break;
     case scSequentialUMinExpr:
-      OpStr = " umin_seq ";
+      OpStr = " umin ";
       break;
     default:
       llvm_unreachable("There are no other nary expression types.");
