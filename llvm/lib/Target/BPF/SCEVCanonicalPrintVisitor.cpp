@@ -195,10 +195,14 @@ switch (S->getSCEVType()) {
     switch (NAry->getSCEVType()) {
     case scAddExpr:
     case scMulExpr:
-      if (NAry->hasNoUnsignedWrap())
-        OS << "<nuw>";
-      if (NAry->hasNoSignedWrap())
-        OS << "<nsw>";
+      if (NAry->hasNoUnsignedWrap()) {
+        //OS << "<nuw>";
+      }
+
+      if (NAry->hasNoSignedWrap()) {
+        //OS << "<nsw>";
+      }
+
       break;
     default:
       // Nothing to print for other nary expressions.
